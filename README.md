@@ -59,7 +59,7 @@ En este orden, y en cuanto un paso da un tema se usa ese:
 2. **Etiquetas y caption**: el género de las etiquetas de los audios, hashtags (`#rock`) y líneas `Género: …` del caption.
 3. **Búsqueda online gratuita**: MusicBrainz, Deezer e iTunes, primero por álbum y si no por artista.
 4. **Claude con búsqueda web** (solo si configuraste `ANTHROPIC_API_KEY`): investiga el álbum y elige el tema más cercano de la lista. Responde "ninguno" si no encuentra nada confiable.
-5. **Pendiente**: te llega un mensaje con los géneros encontrados y botones con todos los temas (más "➕ Crear tema «género»", "🔍 Buscar de nuevo" y "🗑 Descartar"). Si no hubo conexión para buscar, el mensaje lo dice.
+5. **Pendiente**: te llega un mensaje con los géneros encontrados y botones con todos los temas (más "➕ Crear tema «género»", "🔍 Buscar de nuevo", "🗑 Descartar" y "🌐 Buscar en Google", que abre una búsqueda con el artista y el álbum para que veas su género). Si no hubo conexión para buscar, el mensaje lo dice.
 
 Para emparejar un género con un tema se usa `generos.json`: familias (rock, metal, electrónica, latina…) con sus nombres y subgéneros en inglés y español. Así `shoegaze` cae en el tema "Rock", `bachata` en "Música Latina" y, si no hay un tema de metal, `death metal` va al de rock (familias "cercanas"). Cada género encontrado vota, y gana el tema con más votos. Si tus temas tienen nombres que no figuran ahí, agregalos a `generos.json` y reiniciá el bot.
 

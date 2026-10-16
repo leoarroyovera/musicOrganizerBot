@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Awaitable, Callable
+from urllib.parse import quote_plus
 
 from telethon import Button, TelegramClient, events, utils
 from telethon.errors import MessageNotModifiedError
@@ -269,11 +270,18 @@ class OrganizerBot:
             lines.append("\n¿A qué tema lo mando?")
         return "\n".join(lines)
 
+    @staticmethod
+    def google_button(e: dict):
+        query = " ".join(x for x in (e.get("artista"), e.get("album")) if x) \
+            or re.sub(r"\.(zip|rar|7z)$", "", e["nombre"], flags=re.I)
+        return Button.url("🌐 Buscar en Google", "https://www.google.com/search?q=" + quote_plus(f"{query} álbum"))
+
     def pending_buttons(self, e: dict, page=0):
         pid = e["id"]
         if e["tipo"] != "tema":
             return [[Button.inline("🔁 Reintentar", f"pr:{pid}".encode()),
-                     Button.inline("🗑 Descartar", f"pd:{pid}".encode())]]
+                     Button.inline("🗑 Descartar", f"pd:{pid}".encode())],
+                    [self.google_button(e)]]
         topics = self.org.topics
         per = config.TOPICS_PER_PAGE
         pages = max(1, -(-len(topics) // per))
@@ -293,6 +301,7 @@ class OrganizerBot:
             rows.append([Button.inline(f"➕ Crear tema «{g.title()[:30]}»", f"pc:{pid}:{i}".encode())])
         rows.append([Button.inline("🔍 Buscar de nuevo", f"pr:{pid}".encode()),
                      Button.inline("🗑 Descartar", f"pd:{pid}".encode())])
+        rows.append([self.google_button(e)])
         return rows
 
     async def send_pending_card(self, pid: int):
