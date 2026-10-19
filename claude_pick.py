@@ -1,5 +1,5 @@
 """Ultimo recurso antes de dejar un album pendiente: Claude investiga en la
-web el genero del album y elige el tema mas cercano de la lista."""
+web el genero del album y elige la familia (tema) que le corresponde."""
 import json
 
 import anthropic
@@ -8,10 +8,10 @@ import config
 
 SYSTEM = (
     "Clasificás discos para un grupo de Telegram de música en WAV/FLAC organizado por temas "
-    "(uno por género). Te doy un álbum y la lista exacta de temas. Si no conocés bien el "
-    "álbum o el artista, buscá en la web su género. Elegí el tema que mejor le corresponde; "
-    "si ninguno es exacto, el más cercano por estilo. Respondé NINGUNO solo si de verdad no "
-    "encontrás información del álbum ni del artista."
+    "(uno por género). Te doy un álbum y la lista exacta de géneros posibles. Buscá en la web "
+    "el género del álbum (o del artista) y elegí el de la lista que le corresponde; si ninguno "
+    "es exacto, el más cercano por estilo. Si es un compilado de varios artistas, el género "
+    "que predomina. Respondé NINGUNO si no encontrás información confiable."
 )
 NONE = "NINGUNO"
 MAX_CONTINUATIONS = 3
@@ -31,10 +31,11 @@ def _get_client() -> anthropic.AsyncAnthropic:
     return _client
 
 
-async def pick_topic(artist, album, year, genres, filenames, topics: list[str]):
-    """Devuelve (tema, genero, motivo) o None si Claude no encontro uno.
-    `topics` son los titulos exactos de los temas destino."""
-    choices = list(dict.fromkeys(topics)) + [NONE]
+async def pick_family(artist, album, year, genres, filenames, families: dict[str, str]):
+    """Devuelve (clave de familia, genero, motivo) o None si Claude no
+    encontro uno. `families`: {clave: nombre del tema} de generos.json."""
+    by_name = {name: key for key, name in families.items()}
+    choices = list(by_name) + [NONE]
     schema = {
         "type": "object",
         "properties": {
@@ -53,7 +54,7 @@ async def pick_topic(artist, album, year, genres, filenames, topics: list[str]):
         lines.append("Géneros encontrados (pueden ser poco útiles): " + ", ".join(genres[:10]))
     if filenames:
         lines.append("Archivos: " + ", ".join(filenames[:15]))
-    lines.append("\nTemas disponibles:\n" + "\n".join(f"- {t}" for t in choices[:-1]))
+    lines.append("\nGéneros posibles:\n" + "\n".join(f"- {t}" for t in choices[:-1]))
     messages = [{"role": "user", "content": "\n".join(lines)}]
 
     client = _get_client()
@@ -92,6 +93,6 @@ async def pick_topic(artist, album, year, genres, filenames, topics: list[str]):
     except ValueError:
         print(f"  [claude] respuesta no es JSON: {texts[-1][:200]!r}")
         return None
-    if data.get("tema") == NONE or data.get("confianza") == "baja":
+    if data.get("tema") not in by_name or data.get("confianza") == "baja":
         return None
-    return data["tema"], data.get("genero", ""), data.get("motivo", "")
+    return by_name[data["tema"]], data.get("genero", ""), data.get("motivo", "")

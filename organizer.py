@@ -26,7 +26,8 @@ from telethon.tl.types import (
 import config
 import store as store_mod
 from album_name import clean_name, guess_album_name
-from claude_pick import ClaudeUnavailable, pick_topic
+from claude_pick import ClaudeUnavailable, pick_family
+from genre_lookup import WEIGHTS as SOURCE_WEIGHTS
 from genre_lookup import GenreLookup
 from media import (
     MIB,
@@ -41,12 +42,15 @@ from media import (
 )
 from music_meta import AlbumInfo, extract_cover, info_from_tags, peek_zip, read_tags, split_by_album
 from scanner import Unit, scan, summarize
-from topic_match import Matcher, Topic, norm
+from topic_match import ARTIST_SUFFIX, Matcher, Topic, norm
 
 INVITE_RE = re.compile(r"(?:t|telegram)\.me/(?:\+|joinchat/)([\w-]+)", re.I)
 PRIVATE_RE = re.compile(r"(?:t|telegram)\.me/c/(\d+)(?:/(\d+))?(?:/(\d+))?", re.I)
 PUBLIC_RE = re.compile(r"(?:(?:https?://)?(?:www\.)?(?:t|telegram)\.me/(?:s/)?|@)([A-Za-z]\w{3,})(?:/(\d+))?", re.I)
 GENERAL_TOPIC_ID = 1
+TITLE_FAMILIES_ALWAYS = {"bandas sonoras", "navidad"}
+# Album que es solo un numero de volumen: "2", "Volumen 4", "Vol. 3".
+SERIES_RE = re.compile(r"^(?:vol(?:umen|ume)?\s*)?\d+$")
 
 
 class NeedJoin(Exception):
@@ -64,6 +68,7 @@ class Resolution:
     via: str = ""
     genres_seen: list = field(default_factory=list)
     offline: bool = False
+    create: str = ""  # en /analizar: el tema que se crearia
 
 
 @dataclass
@@ -139,6 +144,9 @@ class Organizer:
         self.lookup = GenreLookup(store)
         self.dest = None
         self.dest_id = None
+        # True mientras /rebuscar reprocesa pendientes: los que siguen sin
+        # genero no mandan una tarjeta cada uno (va un resumen al final).
+        self.silent = False
         self.topics: list[Topic] = []
         self.upload_limit = (config.MAX_UPLOAD_MB or 2000) * MIB
         self.zip_max = (config.ZIP_MAX_MB or config.MAX_UPLOAD_MB or 2000) * MIB
@@ -189,44 +197,91 @@ class Organizer:
 
     # ---------- decidir el tema ----------
 
-    async def resolve_topic(self, info: AlbumInfo, filenames, use_claude=True) -> Resolution:
-        learned = self.store.learned
-        if info.artist:
-            hit = learned["artistas"].get(norm(info.artist))
-            topic = hit and self.topic_by_id(hit["topic_id"])
-            if topic:
-                return Resolution(topic, "", f"artista aprendido ({info.artist})")
-        learned_genres = {k: v["topic_id"] for k, v in learned["generos"].items()}
-
-        local = [(g, 1.0) for g in info.genres]
-        seen = list(info.genres)
-        match = self.matcher.best(local, self.topics, learned_genres)
-        if match:
-            return Resolution(match.topic, match.genre, "etiquetas/caption", seen)
-
-        offline = False
+    async def _evidence(self, info: AlbumInfo):
+        """[(fuente, [generos])] de etiquetas/caption y de las busquedas, y si
+        las busquedas no pudieron hacerse por falta de conexion."""
+        evidence = [("etiquetas", list(info.genres))] if info.genres else []
+        # El titulo de un compilado suele decir el genero ("Flash House 3", "18
+        # Lentos Historicos"); el de un disco de artista solo si es una banda
+        # sonora ("Music From The Motion Picture").
+        title = info.album or ""
+        series = bool(info.artist and SERIES_RE.match(norm(title)))
+        if series:  # "16 Dance Hits From Europe - Volumen 4": el "artista" es el titulo
+            title = f"{info.artist} {title}"
+        hit = self.matcher.match(norm(title))
+        # Una palabra amplia ("World Explosion '94") no alcanza para decidir.
+        if hit and hit[0] not in self.matcher.weak:
+            phrase, family, _ = hit
+            exact = phrase == norm(title)  # "Lo Mejor Del Año - Rock": el album es un genero
+            if not info.artist or series or exact or family in TITLE_FAMILIES_ALWAYS:
+                evidence.append(("titulo", [title]))
+        queries = []
         if info.artist or info.album:
-            res = await self.lookup.lookup(info.artist, info.album)
-            seen += [g for g, _, _ in res.candidates if g not in seen]
-            match = self.matcher.best(local + [(g, w) for g, w, _ in res.candidates],
-                                      self.topics, learned_genres)
-            if match:
-                sources = sorted({s for g, _, s in res.candidates if g == match.genre}) or ["online"]
-                return Resolution(match.topic, match.genre, "búsqueda en " + ", ".join(sources), seen)
-            offline = res.offline
+            queries.append((info.artist, info.album))
+        if info.artist and info.album:
+            # Series de compilados ("Pump Dance - 2"): el "artista" es parte del titulo.
+            queries.append(("", f"{info.artist} {info.album}"))
+        offline = False
+        for artist, album in queries:
+            res = await self.lookup.lookup(artist, album)
+            offline = offline or res.offline
+            by_source, artist_level = {}, {}
+            for genre, weight, source in res.candidates:
+                # El primer genero de cada fuente trae su peso completo salvo que
+                # haya encontrado solo al artista (ver genre_lookup.ARTIST_WEIGHT).
+                if source not in artist_level:
+                    artist_level[source] = weight < SOURCE_WEIGHTS.get(source, 1) * 0.9
+                key = source + (ARTIST_SUFFIX if artist_level[source] else "")
+                by_source.setdefault(key, []).append(genre)
+            if by_source:
+                return evidence + list(by_source.items()), False
+        return evidence, offline
 
-        if use_claude and config.USE_CLAUDE and self.topics:
+    async def resolve_topic(self, info: AlbumInfo, filenames, use_claude=True, allow_create=True) -> Resolution:
+        """El tema sale del genero que devuelven las busquedas (y las
+        etiquetas). Si no hay tema para ese genero se crea. Sin genero, el
+        artista que ya asignaste antes; si tampoco, queda pendiente."""
+        learned = self.store.learned
+        artist_hit = learned["artistas"].get(norm(info.artist)) if info.artist else None
+        artist_topic = artist_hit and self.topic_by_id(artist_hit["topic_id"])
+        if artist_topic and artist_hit.get("manual"):
+            return Resolution(artist_topic, "", f"artista asignado con /mapear ({info.artist})")
+
+        evidence, offline = await self._evidence(info)
+        seen = list(dict.fromkeys(g for _, genres in evidence for g in genres))
+        mapped = {k: v["topic_id"] for k, v in learned.get("mapeo_generos", {}).items()}
+        verdict = self.matcher.classify(evidence, mapped)
+
+        if verdict is None and use_claude and config.USE_CLAUDE:
+            families = {k: self.matcher.theme_name(k) for k in self.matcher.families}
             try:
-                picked = await pick_topic(info.artist, info.album, info.year, seen, filenames,
-                                          [t.title for t in self.topics])
+                picked = await pick_family(info.artist, info.album, info.year, seen, filenames, families)
             except ClaudeUnavailable as e:
                 self.log(f"  Claude no disponible: {e}")
                 offline = True
             else:
                 if picked:
-                    topic = next((t for t in self.topics if t.title == picked[0]), None)
-                    if topic:
-                        return Resolution(topic, picked[1], f"Claude ({picked[2]})", seen)
+                    verdict = self.matcher.classify([("claude", [families[picked[0]]])])
+                    if verdict:
+                        verdict.genre = picked[1] or verdict.genre
+                        seen.append(f"{picked[1]} (Claude: {picked[2]})")
+
+        if verdict:
+            via = "votos: " + ", ".join(f"{s} {v[1]}" for s, v in verdict.votes.items())
+            topic = self.matcher.topic_for(verdict, seen, self.topics)
+            if topic:
+                return Resolution(topic, verdict.genre, via, seen)
+            if verdict.family.startswith("tema:"):  # el tema mapeado ya no existe
+                return Resolution(None, verdict.genre, "", seen, offline)
+            theme = self.matcher.theme_name(verdict.family)
+            if not allow_create:
+                return Resolution(None, verdict.genre, via, seen, create=theme)
+            topic = await self.create_topic(theme)
+            self.log(f"  Tema nuevo creado: {theme}")
+            return Resolution(topic, verdict.genre, f"{via} · tema nuevo", seen)
+
+        if artist_topic:
+            return Resolution(artist_topic, "", f"sin género; artista elegido antes ({info.artist})", seen)
         return Resolution(None, "", "", seen, offline)
 
     # ---------- pendientes ----------
@@ -238,6 +293,8 @@ class Organizer:
             "nombre": name, "artista": info.artist, "album": info.album, "anio": info.year,
             "generos": list(genres)[:12], "motivo": reason, "key": key, "topic_id": topic_id,
         })
+        if self.silent:
+            return pid
         try:
             await self.notify_pending(pid)
         except Exception as e:
@@ -322,7 +379,7 @@ class Organizer:
         if res.topic:
             return res.topic, res
         reason = ("sin conexión para buscar el género" if res.offline
-                  else "no encontré un tema que corresponda")
+                  else "no encontré el género (ni en etiquetas ni en MusicBrainz/Deezer/iTunes)")
         await self._add_pending("tema", utils.get_peer_id(entity), source_title, ref, name, info,
                                 reason, genres=res.genres_seen, key=key)
         return None, res
@@ -479,11 +536,14 @@ class Organizer:
             info = unit.guess()
             # Sin descargar no hay etiquetas, y sin Claude para no gastar: los
             # que aca quedan con ❓ pueden resolverse igual al organizar.
-            res = await self.resolve_topic(info, [m.file.name or "" for m in unit.files], use_claude=False)
+            res = await self.resolve_topic(info, [m.file.name or "" for m in unit.files],
+                                           use_claude=False, allow_create=False)
             icon = "📦" if unit.kind == "archivo" else "🎧"
             cover = " 🖼" if unit.covers else ""
             if res.topic:
                 lines.append(f"{icon}{cover} {label} → {res.topic.title} ({res.via})")
+            elif res.create:
+                lines.append(f"{icon}{cover} {label} → 🆕 {res.create} ({res.via})")
             else:
                 lines.append(f"{icon}{cover} {label} → ❓")
         if deferred:

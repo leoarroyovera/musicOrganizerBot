@@ -37,6 +37,18 @@ def _similar(found: str, wanted: str) -> bool:
     return a == b or a in b or b in a or difflib.SequenceMatcher(None, a, b).ratio() >= 0.75
 
 
+VARIOUS = {"various artists", "varios artistas", "various", "varios", "va", "artistas varios"}
+
+
+def _album_ok(found_title: str, found_artist: str, album: str, artist: str) -> bool:
+    """Sin artista (un compilado) el titulo tiene que ser identico y el disco
+    encontrado tiene que ser de "Various Artists": "Dance Mania" a secas
+    coincidia con el disco de Tito Puente de 1958."""
+    if artist:
+        return _similar(found_title, album) and _similar(found_artist, artist)
+    return norm(found_title) == norm(album) and norm(found_artist) in VARIOUS
+
+
 def _lucene(text: str) -> str:
     return text.replace("\\", " ").replace('"', " ")
 
@@ -90,7 +102,10 @@ class GenreLookup:
                 q += f' AND artist:"{_lucene(artist)}"'
             data = await self._mb_get("release-group/", query=q, limit=5)
             for rg in data.get("release-groups", []):
-                if rg.get("score", 0) < 85:
+                credit = " ".join(c.get("name", "") for c in rg.get("artist-credit", []))
+                # Con artista la consulta ya lo exige; el credito se mira solo en compilados.
+                if rg.get("score", 0) < 85 or not _album_ok(rg.get("title", ""), credit if not artist else artist,
+                                                            album, artist):
                     continue
                 full = await self._mb_get(f"release-group/{rg['id']}", inc="genres+tags")
                 names = self._mb_names(full)
@@ -114,7 +129,7 @@ class GenreLookup:
         if "error" in data:
             raise httpx.HTTPError(f"deezer: {data['error']}")
         for item in data.get("data", []):
-            if _similar(item.get("title", ""), album) and _similar(item.get("artist", {}).get("name", ""), artist):
+            if _album_ok(item.get("title", ""), item.get("artist", {}).get("name", ""), album, artist):
                 full = await self._get(f"https://api.deezer.com/album/{item['id']}")
                 names = [g["name"] for g in (full.get("genres") or {}).get("data", [])]
                 return names, False
@@ -125,7 +140,7 @@ class GenreLookup:
             data = await self._get("https://itunes.apple.com/search", term=f"{artist} {album}".strip(),
                                    media="music", entity="album", limit=10)
             for item in data.get("results", []):
-                if _similar(item.get("collectionName", ""), album) and _similar(item.get("artistName", ""), artist):
+                if _album_ok(item.get("collectionName", ""), item.get("artistName", ""), album, artist):
                     return [item["primaryGenreName"]] if item.get("primaryGenreName") else [], False
         if not artist:
             return [], False

@@ -14,6 +14,7 @@ from telethon.tl.types import BotCommand, BotCommandScopeDefault
 import config
 import store as store_mod
 from media import Reporter
+from music_meta import AlbumInfo, parse_name, parse_title
 from organizer import NeedJoin, Organizer, _entity_from_peer, join_chat, resolve_chat
 from topic_match import norm
 
@@ -28,11 +29,12 @@ BOT_COMMANDS = [
     BotCommand("analizar", "Ver qué se enviaría, sin enviar: /analizar <link>"),
     BotCommand("actualizar", "Revisar lo nuevo de los grupos ya organizados"),
     BotCommand("pendientes", "Álbumes esperando que elijas el tema"),
+    BotCommand("rebuscar", "Volver a buscar el género de todos los pendientes"),
     BotCommand("estado", "Tarea en curso y cola"),
     BotCommand("cancelar", "Cancelar la tarea en curso"),
     BotCommand("fuentes", "Grupos organizados y sus números"),
-    BotCommand("temas", "Temas de WAV/FLAC y su género detectado"),
-    BotCommand("aprendido", "Artistas y géneros que aprendí de tus respuestas"),
+    BotCommand("temas", "Temas de WAV/FLAC, su género y los que faltan crear"),
+    BotCommand("aprendido", "Artistas y géneros asignados"),
     BotCommand("mapear", "Asignar a mano: /mapear artista|genero <nombre> = <tema>"),
     BotCommand("olvidar", "Borrar lo aprendido: /olvidar artista|genero <nombre>"),
     BotCommand("logs", "Últimas líneas del log: /logs [n]"),
@@ -45,9 +47,10 @@ HELP = (
     "si es un link a un mensaje, empiezo desde ahí). Recorro sus mensajes, junto los audios "
     "sueltos de cada álbum en un ZIP (los comprimidos van tal cual) y los publico con su "
     "carátula en el tema de WAV/FLAC que corresponde a su género.\n\n"
-    "El tema lo decido por: lo que ya aprendí del artista → etiquetas y caption → búsqueda "
-    "en MusicBrainz, Deezer e iTunes → Claude con búsqueda web (si está configurado). Si nada "
-    "alcanza, el álbum queda en /pendientes para que elijas; lo que elijas lo aprendo.\n\n"
+    "El tema es el género que devuelven MusicBrainz, Deezer, iTunes y las etiquetas (cada "
+    "fuente vota; si no encuentran nada, Claude con búsqueda web, si está configurado). Si "
+    "todavía no hay tema para ese género, lo creo. Si no encuentro el género, el álbum queda "
+    "en /pendientes para que elijas, y recuerdo el artista para cuando tampoco haya género.\n\n"
     "Comandos:\n" + "\n".join(f"/{c.command} — {c.description}" for c in BOT_COMMANDS)
 )
 
@@ -190,6 +193,45 @@ class OrganizerBot:
         dest = f" → {topic.title}" if topic else ""
         return Job(f"Pendiente #{pid} {entry.get('nombre', '')}{dest}", run)
 
+    def research_job(self, pids: list[int]) -> Job:
+        """Vuelve a buscar el genero de los pendientes con lo que ya se sabe de
+        cada uno (sin descargar). Solo baja y publica los que encuentra."""
+        async def run(reporter):
+            resolved, still, failed = [], 0, []
+            for i, pid in enumerate(pids, 1):
+                entry = self.store.get_pending(pid)
+                if entry is None:
+                    continue
+                await reporter.set(f"🔎 {i}/{len(pids)}: {entry['nombre']}")
+                info = parse_name(entry["nombre"]) or parse_title(entry["nombre"]) \
+                    or AlbumInfo(entry.get("artista"), entry.get("album"), entry.get("anio"))
+                info.genres = list(entry.get("generos") or [])
+                res = await self.org.resolve_topic(info, [])
+                if res.topic is None:
+                    still += 1
+                    continue
+                reporter.header = f"🔁 #{pid} {entry['nombre']} → {res.topic.title}"
+                try:
+                    self.org.silent = True
+                    outcomes = await self.org.retry_pending(pid, res.topic, reporter)
+                except Exception as e:
+                    failed.append(f"#{pid} {entry['nombre']}: {e}")
+                    continue
+                finally:
+                    self.org.silent = False
+                if any(o.status == "enviado" for o in outcomes):
+                    resolved.append(f"✅ {entry['nombre']} → {res.topic.title} ({res.genre})")
+                else:
+                    failed.append(f"#{pid} {entry['nombre']}: " + ", ".join(o.detail for o in outcomes))
+            lines = [f"🔁 Pendientes revisados: {len(pids)}",
+                     f"✅ Resueltos: {len(resolved)}   ⏳ Siguen sin género: {still}   ❌ Fallaron: {len(failed)}"]
+            lines += resolved + [f"❌ {f}" for f in failed]
+            if still:
+                lines.append("\nLos que siguen están en /pendientes.")
+            return "\n".join(lines)
+
+        return Job(f"Volver a buscar {len(pids)} pendiente(s)", run)
+
     # ---------- menus ----------
 
     def main_menu(self):
@@ -237,25 +279,38 @@ class OrganizerBot:
     def topics_text(self):
         if not self.org.topics:
             return "El grupo destino no tiene temas (aparte de General)."
+        m = self.org.matcher
         lines = [f"🗂 Temas de {self.org.dest.title}:"]
         for t in self.org.topics:
-            fams = ", ".join(sorted(t.generic)) or (", ".join(sorted(t.specific)) + " (subgénero)" if t.specific else "")
-            lines.append(f"• {t.title}" + (f" → {fams}" if fams else " → ⚠️ sin familia (solo coincidencias exactas)"))
-        lines.append("\nLa familia sale de generos.json; un tema sin familia solo recibe álbumes cuyo "
-                     "género coincida con su nombre (o los que elijas a mano).")
+            if t.family:
+                kind = "" if t.generic else f" (subgénero «{t.phrase}»)"
+                lines.append(f"• {t.title} → {m.theme_name(t.family)}{kind}")
+            else:
+                lines.append(f"• {t.title} → ⚠️ no es un género: solo recibe lo que elijas a mano")
+        used = {t.family for t in self.org.topics if t.family}
+        missing = [m.theme_name(f) for f in m.families if f not in used]
+        if missing:
+            lines.append("\n🆕 Se crean cuando llegue un álbum de ese género: " + ", ".join(missing))
+        lines.append("\nLos géneros y nombres están en generos.json.")
         return "\n".join(lines)
 
     def learned_text(self):
         lrn = self.store.learned
-        if not lrn["artistas"] and not lrn["generos"]:
-            return "Todavía no aprendí nada. Lo hago cada vez que elegís el tema de un pendiente."
+        if not lrn["artistas"] and not lrn["mapeo_generos"]:
+            return ("Todavía no hay nada. Cuando elegís el tema de un pendiente recuerdo el artista; "
+                    "con /mapear asignás artistas o géneros a mano.")
         lines = []
-        if lrn["artistas"]:
-            lines.append("👤 Artistas:")
-            lines += [f"• {v['nombre']} → {v['tema']}" for v in lrn["artistas"].values()]
-        if lrn["generos"]:
-            lines.append("🏷 Géneros:")
-            lines += [f"• {v['nombre']} → {v['tema']}" for v in lrn["generos"].values()]
+        manual = [v for v in lrn["artistas"].values() if v.get("manual")]
+        chosen = [v for v in lrn["artistas"].values() if not v.get("manual")]
+        if manual:
+            lines.append("👤 Artistas asignados con /mapear (ganan sobre el género):")
+            lines += [f"• {v['nombre']} → {v['tema']}" for v in manual]
+        if chosen:
+            lines.append("👤 Artistas elegidos en pendientes (solo si no encuentro el género):")
+            lines += [f"• {v['nombre']} → {v['tema']}" for v in chosen]
+        if lrn["mapeo_generos"]:
+            lines.append("🏷 Géneros asignados con /mapear:")
+            lines += [f"• {v['nombre']} → {v['tema']}" for v in lrn["mapeo_generos"].values()]
         lines.append("\nPara corregir: /olvidar artista|genero <nombre> o /mapear …")
         return "\n".join(lines)
 
@@ -314,23 +369,23 @@ class OrganizerBot:
         if not items:
             await event.respond("✨ No hay pendientes.")
             return
-        await event.respond(f"⏳ {len(items)} pendiente(s):")
+        await event.respond(f"⏳ {len(items)} pendiente(s):", buttons=[[
+            Button.inline("🔁 Volver a buscar el género de todos", b"m:rebuscar")]])
         for e in items[:15]:
             await event.respond(self.pending_text(e), buttons=self.pending_buttons(e))
         if len(items) > 15:
             await event.respond(f"…y {len(items) - 15} más. Resolvé estos y volvé a abrir /pendientes.")
 
     def learn_from(self, entry: dict, topic) -> list[str]:
-        learned = []
+        """Solo el artista, y solo para cuando no aparezca el genero: aprender
+        generos de un pendiente mandaba "rock" o "reggae" a temas equivocados."""
         artist = entry.get("artista")
-        if artist and norm(artist) not in ("varios artistas", "various artists", "va"):
-            self.store.learn("artistas", norm(artist), artist, topic.id, topic.title)
-            learned.append(f"artista {artist}")
-        for g in entry.get("generos", []):
-            if norm(g) and norm(g) not in self.store.learned["generos"]:
-                self.store.learn("generos", norm(g), g, topic.id, topic.title)
-                learned.append(f"género {g}")
-        return learned
+        known = self.store.learned["artistas"].get(norm(artist or ""))
+        if not artist or norm(artist) in ("varios artistas", "various artists", "va") \
+                or (known and known.get("manual")):
+            return []
+        self.store.learn("artistas", norm(artist), artist, topic.id, topic.title)
+        return [f"artista {artist}"]
 
     async def choose_topic(self, event, pid: int, topic):
         entry = self.store.get_pending(pid)
@@ -402,14 +457,14 @@ class OrganizerBot:
         m = re.match(r"/mapear\s+(artista|g[eé]nero)\s+(.+?)\s*=\s*(.+)$", event.raw_text.strip(), re.I)
         if not m:
             await event.respond("Uso: /mapear artista Soda Stereo = Rock en Español\n"
-                                "     /mapear genero synthwave = Electrónica")
+                                "     /mapear genero synthwave = Dance - Electronica")
             return
-        kind = "artistas" if m[1].lower() == "artista" else "generos"
+        kind = "artistas" if m[1].lower() == "artista" else "mapeo_generos"
         topic = self.find_topic(m[3])
         if topic is None:
             await event.respond(f"No encontré un único tema que se llame «{m[3]}». Mirá /temas.")
             return
-        self.store.learn(kind, norm(m[2]), m[2].strip(), topic.id, topic.title)
+        self.store.learn(kind, norm(m[2]), m[2].strip(), topic.id, topic.title, manual=True)
         await event.respond(f"🧠 Listo: {m[1].lower()} {m[2].strip()} → {topic.title}")
 
     async def on_forget(self, event):
@@ -417,9 +472,16 @@ class OrganizerBot:
         if not m:
             await event.respond("Uso: /olvidar artista <nombre> o /olvidar genero <nombre>")
             return
-        kind = "artistas" if m[1].lower() == "artista" else "generos"
+        kind = "artistas" if m[1].lower() == "artista" else "mapeo_generos"
         ok = self.store.forget(kind, norm(m[2]))
         await event.respond("🗑 Olvidado." if ok else "No tenía eso aprendido.")
+
+    async def on_research(self, event):
+        pids = [e["id"] for e in self.store.pending["items"].values() if e["tipo"] == "tema"]
+        if not pids:
+            await event.respond("No hay pendientes por tema.")
+            return
+        await self.enqueue(self.research_job(pids), event)
 
     async def on_logs(self, event):
         n = int(event.pattern_match.group(1) or 30)
@@ -466,6 +528,7 @@ class OrganizerBot:
                 "apr": lambda: self.on_learned(event),
                 "logs": lambda: self.respond_logs(event),
                 "cancel": lambda: self.on_cancel(event),
+                "rebuscar": lambda: self.on_research(event),
                 "help": lambda: event.respond(HELP),
             }
             if rest in actions:
@@ -537,6 +600,7 @@ class OrganizerBot:
             (self.on_source_cmd, r"^/(organizar|analizar)\b\s*(.*)"),
             (self.on_update, r"^/actualizar\b"),
             (self.on_pending, r"^/pendientes\b"),
+            (self.on_research, r"^/rebuscar\b"),
             (self.on_status, r"^/estado\b"),
             (self.on_cancel, r"^/cancelar\b"),
             (self.on_sources, r"^/fuentes\b"),

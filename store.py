@@ -68,7 +68,12 @@ class Store:
     def __init__(self):
         self.pending = load_json(config.PENDING_PATH, {"next_id": 1, "items": {}})
         self.sent = load_json(config.SENT_PATH, {})
-        self.learned = load_json(config.LEARNED_PATH, {"artistas": {}, "generos": {}})
+        self.learned = load_json(config.LEARNED_PATH, {"artistas": {}})
+        self.learned.setdefault("artistas", {})
+        # genero -> tema, solo los que cargaste con /mapear genero. ("generos",
+        # de versiones anteriores, se aprendia solo de los pendientes y metia
+        # generos en temas equivocados: ya no se usa.)
+        self.learned.setdefault("mapeo_generos", {})
         self.lookup_cache = load_json(config.LOOKUP_CACHE_PATH, {})
 
     def save_pending(self):
@@ -103,9 +108,10 @@ class Store:
         self.sent[key] = {"nombre": name, "tema": topic, "fuente": source, "fecha": now_iso()}
         self.save_sent()
 
-    def learn(self, kind: str, key: str, label: str, topic_id: int, topic: str) -> None:
-        """kind: "artistas" o "generos"; key ya normalizada."""
-        self.learned[kind][key] = {"nombre": label, "topic_id": topic_id, "tema": topic}
+    def learn(self, kind: str, key: str, label: str, topic_id: int, topic: str, manual=False) -> None:
+        """kind: "artistas" o "mapeo_generos"; key ya normalizada. `manual`:
+        cargado con /mapear (para un artista, gana sobre el genero)."""
+        self.learned[kind][key] = {"nombre": label, "topic_id": topic_id, "tema": topic, "manual": manual}
         self.save_learned()
 
     def forget(self, kind: str, key: str) -> bool:

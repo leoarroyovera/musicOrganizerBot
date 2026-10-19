@@ -1,102 +1,877 @@
 {
-  "_ayuda": "Cada familia tiene 'nombres' (como se puede llamar un tema generico de esa familia) y 'subgeneros' (generos que caen en ella). Un genero que no coincide con ningun tema se manda al tema generico de su familia; si no hay, al de una familia 'cercana'. Las mayusculas, acentos y signos no importan. Agrega lo que necesites y reinicia el bot.",
+  "_ayuda": "Cada familia es un tema de WAV/FLAC. 'tema' es el nombre con el que el bot lo crea si todavia no existe. 'nombres' son otras formas de llamar a ese tema (si en el grupo ya hay un tema con alguno de esos nombres, se usa ese). 'subgeneros' son los generos que devuelven MusicBrainz/Deezer/iTunes o las etiquetas y que caen en esa familia. 'debiles' son etiquetas tan amplias que valen medio voto (iTunes dice 'Pop' a casi todo). Las mayusculas, acentos y signos no importan. Despues de editar, reinicia el bot. 'ganan_empates': si dos familias empatan en votos, gana la que aparece primero en esta lista (las latinas y regionales son mas precisas que 'Pop' o 'Rock'). 'regionales': si una fuente nombra una de estas familias entre sus generos (\"rock, latin rock\"), vota por ella aunque no sea la primera. 'paraguas': terminos que solo dicen 'latino' sin el estilo; no activan la regla de 'regionales'.",
+  "debiles": [
+    "pop",
+    "world",
+    "world music",
+    "international",
+    "internacional"
+  ],
+  "ganan_empates": [
+    "rock en espanol",
+    "urbano latino",
+    "regional mexicano",
+    "tropical",
+    "brasilera",
+    "romantica",
+    "pop latino"
+  ],
+  "regionales": [
+    "rock en espanol",
+    "urbano latino",
+    "regional mexicano",
+    "tropical",
+    "brasilera",
+    "pop latino"
+  ],
+  "paraguas": [
+    "latin",
+    "latino",
+    "latina",
+    "latin music",
+    "musica latina",
+    "latinoamericana",
+    "musica latinoamericana"
+  ],
   "familias": {
-    "rock": {
-      "nombres": ["rock", "rock and roll", "rock & roll", "rock en espanol", "rock en español", "rock nacional", "rock clasico", "classic rock"],
-      "subgeneros": ["alternative", "alternativo", "alternative rock", "rock alternativo", "indie", "indie rock", "grunge", "punk", "punk rock", "post punk", "post-punk", "hardcore punk", "pop punk", "emo", "shoegaze", "dream pop", "noise rock", "psychedelic", "psychedelic rock", "rock psicodelico", "progressive rock", "prog rock", "rock progresivo", "art rock", "krautrock", "garage", "garage rock", "britpop", "new wave", "post rock", "post-rock", "math rock", "hard rock", "blues rock", "southern rock", "glam rock", "stoner rock", "surf rock", "rockabilly", "soft rock", "folk rock", "latin rock", "space rock", "gothic rock", "rock gotico", "college rock", "j-rock", "c-rock", "pop rock", "aor", "arena rock", "heartland rock", "jangle pop", "power pop", "slowcore", "sadcore", "midwest emo", "post hardcore", "post-hardcore"]
-    },
-    "metal": {
-      "nombres": ["metal", "heavy metal", "heavy"],
-      "subgeneros": ["thrash", "thrash metal", "death metal", "black metal", "doom", "doom metal", "sludge", "sludge metal", "power metal", "speed metal", "nu metal", "nu-metal", "metalcore", "deathcore", "grindcore", "symphonic metal", "progressive metal", "metal progresivo", "gothic metal", "folk metal", "viking metal", "djent", "industrial metal", "alternative metal", "groove metal", "stoner metal", "post metal", "drone metal", "glam metal", "hair metal", "nwobhm"]
+    "electronica": {
+      "tema": "Dance - Electrónica",
+      "nombres": [
+        "dance electronica",
+        "dance",
+        "electronica",
+        "electronic",
+        "electronic music",
+        "musica electronica",
+        "electro",
+        "edm",
+        "dance music",
+        "electronica dance",
+        "dance electronic"
+      ],
+      "subgeneros": [
+        "house",
+        "deep house",
+        "tech house",
+        "progressive house",
+        "euro house",
+        "eurodance",
+        "euro dance",
+        "hi nrg",
+        "italo disco",
+        "italo dance",
+        "eurobeat",
+        "techno",
+        "minimal",
+        "minimal techno",
+        "trance",
+        "psytrance",
+        "goa",
+        "ambient",
+        "dark ambient",
+        "idm",
+        "drum and bass",
+        "dnb",
+        "jungle",
+        "breakbeat",
+        "breakbeat hardcore",
+        "big beat",
+        "dubstep",
+        "uk garage",
+        "2 step",
+        "electro house",
+        "synthwave",
+        "retrowave",
+        "vaporwave",
+        "downtempo",
+        "trip hop",
+        "chillout",
+        "chill out",
+        "lounge",
+        "electroclash",
+        "industrial",
+        "ebm",
+        "darkwave",
+        "hardstyle",
+        "hardcore techno",
+        "happy hardcore",
+        "gabber",
+        "makina",
+        "bakalao",
+        "ruta destroy",
+        "miami bass",
+        "bassline",
+        "club",
+        "club dance",
+        "rave",
+        "acid house",
+        "hip house",
+        "freestyle",
+        "disco",
+        "nu disco",
+        "disco polo",
+        "future bass",
+        "glitch",
+        "footwork",
+        "electro latino",
+        "edm latino",
+        "euro trance",
+        "dream dance",
+        "eurohouse",
+        "dance pop",
+        "europop",
+        "euro pop",
+        "bubblegum dance",
+        "remix",
+        "remixes",
+        "megamix",
+        "dancemix",
+        "dance mix",
+        "12 pulgadas",
+        "maxi single",
+        "discotheque",
+        "dee jays"
+      ]
     },
     "pop": {
-      "nombres": ["pop", "pop music", "musica pop"],
-      "subgeneros": ["synthpop", "synth pop", "electropop", "dance pop", "teen pop", "art pop", "indie pop", "chamber pop", "baroque pop", "sophisti pop", "k-pop", "kpop", "j-pop", "jpop", "city pop", "c-pop", "europop", "bubblegum", "adult contemporary", "vocal", "easy listening", "pop vocal", "traditional pop", "hyperpop", "bedroom pop", "pop britanico"]
+      "tema": "Pop",
+      "nombres": [
+        "pop",
+        "pop music",
+        "musica pop",
+        "pop en ingles",
+        "pop internacional",
+        "pop and chart",
+        "pop anglo"
+      ],
+      "subgeneros": [
+        "synthpop",
+        "synth pop",
+        "electropop",
+        "teen pop",
+        "art pop",
+        "chamber pop",
+        "baroque pop",
+        "sophisti pop",
+        "k pop",
+        "j pop",
+        "city pop",
+        "c pop",
+        "bubblegum",
+        "bubblegum pop",
+        "adult contemporary",
+        "easy listening",
+        "vocal",
+        "pop vocal",
+        "traditional pop",
+        "hyperpop",
+        "bedroom pop",
+        "boy band",
+        "girl group"
+      ]
     },
-    "electronica": {
-      "nombres": ["electronica", "electrónica", "electronic", "electronic music", "musica electronica", "electro", "dance", "edm", "dance electronica"],
-      "subgeneros": ["house", "deep house", "tech house", "progressive house", "techno", "minimal", "minimal techno", "trance", "psytrance", "goa", "ambient", "dark ambient", "idm", "drum and bass", "drum & bass", "dnb", "jungle", "breakbeat", "big beat", "dubstep", "uk garage", "garage house", "2-step", "grime", "electro house", "synthwave", "retrowave", "vaporwave", "chillwave", "downtempo", "trip hop", "trip-hop", "chillout", "chill out", "lounge", "electroclash", "industrial", "ebm", "darkwave", "coldwave", "hardstyle", "gabber", "glitch", "electronica experimental", "footwork", "disco", "nu disco", "italo disco", "hi nrg", "eurodance", "future bass", "electro latino", "edm latino"]
+    "pop latino": {
+      "tema": "Pop Latino",
+      "nombres": [
+        "pop latino",
+        "latin pop",
+        "pop en espanol",
+        "pop espanol",
+        "pop latin",
+        "latin",
+        "latino",
+        "latina",
+        "musica latina",
+        "latin music",
+        "latinoamericana",
+        "musica latinoamericana"
+      ],
+      "subgeneros": [
+        "spanish pop",
+        "latin dance",
+        "latin freestyle",
+        "techno latino",
+        "south america",
+        "sudamerica"
+      ]
+    },
+    "tropical": {
+      "tema": "Cumbia y Tropical",
+      "nombres": [
+        "cumbia",
+        "tropical",
+        "musica tropical",
+        "cumbia y tropical",
+        "salsa y tropical",
+        "tropical latino"
+      ],
+      "subgeneros": [
+        "cumbia argentina",
+        "cumbia villera",
+        "cumbia sonidera",
+        "cumbia colombiana",
+        "cumbia peruana",
+        "tecnocumbia",
+        "chicha",
+        "cuarteto",
+        "salsa",
+        "salsa romantica",
+        "merengue",
+        "bachata",
+        "vallenato",
+        "son",
+        "son cubano",
+        "timba",
+        "mambo",
+        "guaracha",
+        "cha cha cha",
+        "plena",
+        "bomba",
+        "lambada",
+        "rumba",
+        "porro",
+        "guaracha santiagueña",
+        "cumbia santafesina",
+        "villera",
+        "fiesta villera",
+        "caribe",
+        "caribean",
+        "caribbean",
+        "musica caribena"
+      ]
+    },
+    "urbano latino": {
+      "tema": "Urbano Latino",
+      "nombres": [
+        "urbano latino",
+        "latin urban",
+        "musica urbana",
+        "urbano"
+      ],
+      "subgeneros": [
+        "reggaeton",
+        "regueton",
+        "dembow",
+        "latin trap",
+        "trap latino",
+        "latin hip hop",
+        "rap latino",
+        "hip hop latino",
+        "moombahton",
+        "reggae en espanol",
+        "perreo"
+      ]
+    },
+    "regional mexicano": {
+      "tema": "Regional Mexicano",
+      "nombres": [
+        "regional mexicano",
+        "musica mexicana",
+        "mexicana",
+        "mexicano",
+        "musica regional mexicana"
+      ],
+      "subgeneros": [
+        "ranchera",
+        "mariachi",
+        "banda",
+        "banda sinaloense",
+        "corridos",
+        "corridos tumbados",
+        "norteno",
+        "grupero",
+        "tejano",
+        "duranguense",
+        "huapango",
+        "son jarocho"
+      ]
+    },
+    "romantica": {
+      "tema": "Romántico",
+      "nombres": [
+        "romantico",
+        "romantica",
+        "romanticos",
+        "baladas",
+        "balada",
+        "baladas romanticas",
+        "baladas y boleros",
+        "lentos"
+      ],
+      "subgeneros": [
+        "ballad",
+        "latin ballad",
+        "balada romantica",
+        "cancion melodica",
+        "melodica",
+        "bolero",
+        "boleros",
+        "trova romantica",
+        "power ballad"
+      ]
+    },
+    "rock": {
+      "tema": "Rock",
+      "nombres": [
+        "rock",
+        "rock en ingles",
+        "rock internacional",
+        "classic rock",
+        "rock clasico",
+        "rock and roll"
+      ],
+      "subgeneros": [
+        "hard rock",
+        "punk",
+        "punk rock",
+        "pop punk",
+        "hardcore punk",
+        "psychedelic rock",
+        "rock psicodelico",
+        "progressive rock",
+        "prog rock",
+        "rock progresivo",
+        "art rock",
+        "krautrock",
+        "zeuhl",
+        "garage rock",
+        "blues rock",
+        "southern rock",
+        "glam rock",
+        "stoner rock",
+        "surf rock",
+        "surf",
+        "rockabilly",
+        "soft rock",
+        "space rock",
+        "gothic rock",
+        "pop rock",
+        "aor",
+        "arena rock",
+        "heartland rock",
+        "power pop",
+        "merseybeat",
+        "beat",
+        "doo wop",
+        "rock n roll",
+        "j rock"
+      ]
+    },
+    "alternativo": {
+      "tema": "Alternativo",
+      "nombres": [
+        "alternativo",
+        "alternative",
+        "alternative rock",
+        "rock alternativo",
+        "indie",
+        "indie rock",
+        "alternativo e indie"
+      ],
+      "subgeneros": [
+        "grunge",
+        "post punk",
+        "new wave",
+        "shoegaze",
+        "dream pop",
+        "noise rock",
+        "noise pop",
+        "britpop",
+        "emo",
+        "post rock",
+        "math rock",
+        "college rock",
+        "jangle pop",
+        "slowcore",
+        "sadcore",
+        "midwest emo",
+        "post hardcore",
+        "indie pop",
+        "lo fi",
+        "madchester",
+        "coldwave",
+        "gothic",
+        "goth"
+      ]
+    },
+    "rock en espanol": {
+      "tema": "Rock en Español",
+      "nombres": [
+        "rock en espanol",
+        "rock latino",
+        "latin rock",
+        "rock nacional",
+        "rock argentino",
+        "rock mexicano",
+        "rock chileno",
+        "rock en tu idioma",
+        "rock iberoamericano",
+        "rock y alternativo"
+      ],
+      "subgeneros": [
+        "latin alternative",
+        "alternativo latino",
+        "rock rioplatense",
+        "rock urbano",
+        "rock barrial",
+        "rock pop en espanol"
+      ]
+    },
+    "metal": {
+      "tema": "Metal",
+      "nombres": [
+        "metal",
+        "heavy metal",
+        "heavy"
+      ],
+      "subgeneros": [
+        "thrash",
+        "thrash metal",
+        "death metal",
+        "black metal",
+        "doom",
+        "doom metal",
+        "sludge metal",
+        "power metal",
+        "speed metal",
+        "nu metal",
+        "metalcore",
+        "deathcore",
+        "grindcore",
+        "symphonic metal",
+        "progressive metal",
+        "gothic metal",
+        "folk metal",
+        "viking metal",
+        "djent",
+        "industrial metal",
+        "alternative metal",
+        "groove metal",
+        "glam metal",
+        "hair metal",
+        "nwobhm"
+      ]
     },
     "hip hop": {
-      "nombres": ["hip hop", "hip-hop", "rap", "hip hop rap", "hip-hop/rap", "rap/hip hop", "rap hip hop", "hip hop y rap", "rap y hip hop"],
-      "subgeneros": ["trap", "boom bap", "gangsta rap", "conscious hip hop", "underground hip hop", "east coast hip hop", "west coast hip hop", "southern hip hop", "dirty south", "g-funk", "drill", "uk drill", "grime rap", "abstract hip hop", "jazz rap", "alternative hip hop", "hardcore hip hop", "cloud rap", "emo rap", "rap latino", "rap en espanol", "rap español", "horrorcore", "crunk", "phonk", "hip hop latino"]
+      "tema": "Hip Hop / Rap",
+      "nombres": [
+        "hip hop",
+        "rap",
+        "hip hop rap",
+        "rap hip hop",
+        "hip hop y rap",
+        "rap y hip hop"
+      ],
+      "subgeneros": [
+        "trap",
+        "boom bap",
+        "gangsta rap",
+        "conscious hip hop",
+        "underground hip hop",
+        "east coast hip hop",
+        "west coast hip hop",
+        "southern hip hop",
+        "dirty south",
+        "g funk",
+        "drill",
+        "uk drill",
+        "grime",
+        "abstract hip hop",
+        "jazz rap",
+        "alternative hip hop",
+        "hardcore hip hop",
+        "cloud rap",
+        "emo rap",
+        "horrorcore",
+        "crunk",
+        "phonk",
+        "pop rap"
+      ]
     },
     "rnb soul": {
-      "nombres": ["r&b", "rnb", "r and b", "rhythm and blues", "soul", "r&b/soul", "soul & funk", "soul y funk", "r&b soul", "rnb soul", "funk"],
-      "subgeneros": ["neo soul", "neo-soul", "contemporary r&b", "motown", "northern soul", "southern soul", "deep soul", "philly soul", "quiet storm", "new jack swing", "funk rock", "p-funk", "boogie", "alternative r&b", "soul blues", "doo wop", "doo-wop"]
+      "tema": "R&B / Soul",
+      "nombres": [
+        "r and b",
+        "rnb",
+        "rhythm and blues",
+        "soul",
+        "r and b soul",
+        "soul and funk",
+        "soul y funk",
+        "rnb soul",
+        "funk"
+      ],
+      "subgeneros": [
+        "neo soul",
+        "contemporary r and b",
+        "motown",
+        "northern soul",
+        "southern soul",
+        "philly soul",
+        "quiet storm",
+        "new jack swing",
+        "funk rock",
+        "p funk",
+        "boogie",
+        "alternative r and b"
+      ]
     },
     "jazz": {
-      "nombres": ["jazz"],
-      "subgeneros": ["bebop", "hard bop", "cool jazz", "free jazz", "modal jazz", "fusion", "jazz fusion", "jazz rock", "smooth jazz", "acid jazz", "swing", "big band", "vocal jazz", "latin jazz", "jazz latino", "gypsy jazz", "dixieland", "avant garde jazz", "post bop", "contemporary jazz", "nu jazz", "ecm", "spiritual jazz", "soul jazz", "afro cuban jazz"]
+      "tema": "Jazz",
+      "nombres": [
+        "jazz"
+      ],
+      "subgeneros": [
+        "bebop",
+        "hard bop",
+        "cool jazz",
+        "free jazz",
+        "modal jazz",
+        "fusion",
+        "jazz fusion",
+        "jazz rock",
+        "smooth jazz",
+        "acid jazz",
+        "swing",
+        "big band",
+        "vocal jazz",
+        "latin jazz",
+        "jazz latino",
+        "gypsy jazz",
+        "dixieland",
+        "post bop",
+        "contemporary jazz",
+        "nu jazz",
+        "spiritual jazz",
+        "soul jazz",
+        "bossa jazz"
+      ]
     },
     "blues": {
-      "nombres": ["blues"],
-      "subgeneros": ["delta blues", "chicago blues", "electric blues", "country blues", "texas blues", "blues electrico", "modern blues", "harmonica blues", "boogie woogie"]
+      "tema": "Blues",
+      "nombres": [
+        "blues"
+      ],
+      "subgeneros": [
+        "delta blues",
+        "chicago blues",
+        "electric blues",
+        "country blues",
+        "texas blues",
+        "modern blues",
+        "boogie woogie"
+      ]
     },
     "clasica": {
-      "nombres": ["clasica", "clásica", "classical", "musica clasica", "música clásica", "classical music", "academica", "erudita"],
-      "subgeneros": ["opera", "ópera", "baroque", "barroco", "romantic", "romanticismo", "classical period", "orchestral", "orquestal", "symphony", "sinfonica", "chamber music", "musica de camara", "early music", "medieval", "renaissance", "renacimiento", "contemporary classical", "modern classical", "minimalism", "neoclassical", "neoclasica", "choral", "coral", "piano solo", "concerto", "lieder", "zarzuela", "gregorian chant", "canto gregoriano"]
-    },
-    "latina": {
-      "nombres": ["latina", "latino", "latin", "musica latina", "música latina", "latin music", "latinoamericana", "musica latinoamericana", "musica tropical", "tropical", "latin urban", "urbano latino", "musica urbana"],
-      "subgeneros": ["salsa", "cumbia", "bachata", "merengue", "reggaeton", "reguetón", "reggaetón", "dembow", "latin pop", "pop latino", "bolero", "tango", "bossa nova", "samba", "mpb", "forro", "son", "son cubano", "timba", "mambo", "cha cha cha", "guaracha", "regional mexicano", "mexicano", "ranchera", "mariachi", "banda", "corridos", "corridos tumbados", "norteno", "norteño", "grupero", "vallenato", "musica andina", "andina", "folklore", "folclore", "folclor", "chacarera", "zamba", "huayno", "cueca", "joropo", "trova", "nueva trova", "nueva cancion", "cuarteto", "plena", "bomba", "latin alternative", "alternativo latino", "rock latino", "latin trap", "trap latino", "salsa y tropical", "latin music", "musica brasilena", "brazilian music", "brazilian", "sertanejo", "pagode", "axe", "tecnocumbia", "chicha", "bachata urbana", "latin jazz"]
+      "tema": "Clásica",
+      "nombres": [
+        "clasica",
+        "classical",
+        "musica clasica",
+        "classical music",
+        "academica",
+        "erudita"
+      ],
+      "subgeneros": [
+        "opera",
+        "baroque",
+        "barroco",
+        "romantic era",
+        "orchestral",
+        "orquestal",
+        "symphony",
+        "sinfonica",
+        "chamber music",
+        "musica de camara",
+        "early music",
+        "medieval",
+        "renaissance",
+        "renacimiento",
+        "contemporary classical",
+        "modern classical",
+        "minimalism",
+        "neoclassical",
+        "choral",
+        "coral",
+        "concerto",
+        "lieder",
+        "zarzuela",
+        "cantata",
+        "gregorian chant",
+        "canto gregoriano"
+      ]
     },
     "reggae": {
-      "nombres": ["reggae"],
-      "subgeneros": ["dub", "roots reggae", "ska", "rocksteady", "dancehall", "lovers rock", "ragga", "reggae en espanol", "two tone", "2 tone"]
+      "tema": "Reggae",
+      "nombres": [
+        "reggae"
+      ],
+      "subgeneros": [
+        "dub",
+        "roots reggae",
+        "ska",
+        "rocksteady",
+        "dancehall",
+        "lovers rock",
+        "ragga",
+        "two tone",
+        "2 tone"
+      ]
     },
     "folk": {
-      "nombres": ["folk", "folk music", "musica folk"],
-      "subgeneros": ["indie folk", "folk pop", "contemporary folk", "americana", "singer songwriter", "singer-songwriter", "cantautor", "cantautores", "acoustic", "acustico", "celtic", "celta", "freak folk", "anti folk", "neofolk", "british folk", "folk tradicional", "traditional folk", "chamber folk"]
+      "tema": "Folk",
+      "nombres": [
+        "folk",
+        "folk music",
+        "musica folk",
+        "folklore",
+        "folclore",
+        "folclor"
+      ],
+      "subgeneros": [
+        "indie folk",
+        "folk pop",
+        "folk rock",
+        "contemporary folk",
+        "americana",
+        "singer songwriter",
+        "cantautor",
+        "cantautores",
+        "acoustic",
+        "celtic",
+        "celta",
+        "neofolk",
+        "british folk",
+        "traditional folk",
+        "chacarera",
+        "zamba",
+        "huayno",
+        "cueca",
+        "joropo",
+        "musica andina",
+        "andina",
+        "trova",
+        "nueva trova",
+        "nueva cancion"
+      ]
     },
     "country": {
-      "nombres": ["country", "country music"],
-      "subgeneros": ["bluegrass", "alt country", "alt-country", "outlaw country", "honky tonk", "country pop", "country rock", "western", "nashville sound", "americana country", "red dirt"]
+      "tema": "Country",
+      "nombres": [
+        "country",
+        "country music"
+      ],
+      "subgeneros": [
+        "bluegrass",
+        "alt country",
+        "outlaw country",
+        "honky tonk",
+        "country pop",
+        "country rock",
+        "western",
+        "nashville sound",
+        "red dirt"
+      ]
     },
-    "bandas sonoras": {
-      "nombres": ["soundtrack", "soundtracks", "banda sonora", "bandas sonoras", "bso", "ost", "films/games", "film games", "cine", "peliculas", "musica de peliculas"],
-      "subgeneros": ["film score", "score", "original score", "film soundtrack", "movie soundtrack", "video game music", "videojuegos", "game soundtrack", "anime", "musical", "musicals", "broadway", "show tunes", "television", "tv soundtrack", "series"]
+    "brasilera": {
+      "tema": "Música Brasileña",
+      "nombres": [
+        "musica brasilena",
+        "musica brasileira",
+        "brazilian music",
+        "brazilian",
+        "brasil"
+      ],
+      "subgeneros": [
+        "samba",
+        "bossa nova",
+        "mpb",
+        "forro",
+        "axe",
+        "sertanejo",
+        "pagode",
+        "batucada",
+        "samba reggae",
+        "funk carioca",
+        "baile funk",
+        "tropicalia"
+      ]
     },
     "world": {
-      "nombres": ["world", "world music", "musica del mundo", "músicas del mundo", "etnica", "ethnic", "internacional"],
-      "subgeneros": ["african music", "africa", "afrobeat", "afrobeats", "highlife", "soukous", "mbalax", "flamenco", "fado", "celtic music", "indian music", "bollywood", "qawwali", "asian music", "arabic", "musica arabe", "turkish", "klezmer", "balkan", "rai", "gnawa", "desert blues", "tuareg", "world fusion", "chanson", "musique francaise", "french pop", "canzone", "cantautore italiano", "rebetiko", "enka"]
+      "tema": "Música del Mundo",
+      "nombres": [
+        "world",
+        "world music",
+        "musica del mundo",
+        "musicas del mundo",
+        "etnica",
+        "ethnic",
+        "international",
+        "internacional"
+      ],
+      "subgeneros": [
+        "african music",
+        "afrobeat",
+        "afrobeats",
+        "highlife",
+        "soukous",
+        "kuduro",
+        "kizomba",
+        "flamenco",
+        "rumba flamenca",
+        "rumba catalana",
+        "sevillanas",
+        "copla",
+        "fado",
+        "indian music",
+        "bollywood",
+        "qawwali",
+        "asian music",
+        "arabic",
+        "turkish",
+        "klezmer",
+        "balkan",
+        "rai",
+        "chanson",
+        "musique francaise",
+        "french pop",
+        "canzone",
+        "enka",
+        "polka"
+      ]
+    },
+    "bandas sonoras": {
+      "tema": "OST",
+      "nombres": [
+        "ost",
+        "soundtrack",
+        "soundtracks",
+        "banda sonora",
+        "bandas sonoras",
+        "bso",
+        "films games",
+        "cine",
+        "peliculas",
+        "musica de peliculas",
+        "peliculas juegos"
+      ],
+      "subgeneros": [
+        "film score",
+        "score",
+        "original score",
+        "scores de peliculas",
+        "film soundtrack",
+        "movie soundtrack",
+        "video game music",
+        "videojuegos",
+        "game soundtrack",
+        "anime",
+        "musical",
+        "musicals",
+        "broadway",
+        "show tunes",
+        "television",
+        "tv soundtrack",
+        "motion picture",
+        "music from the motion picture",
+        "original motion picture soundtrack",
+        "original soundtrack",
+        "banda original",
+        "music from and inspired by",
+        "the movie"
+      ]
     },
     "infantil": {
-      "nombres": ["infantil", "musica infantil", "kids", "children", "children's music", "ninos"],
-      "subgeneros": ["lullaby", "canciones infantiles", "nursery rhymes"]
+      "tema": "Infantiles",
+      "nombres": [
+        "infantiles",
+        "infantil",
+        "musica infantil",
+        "kids",
+        "children",
+        "childrens music",
+        "ninos"
+      ],
+      "subgeneros": [
+        "lullaby",
+        "canciones infantiles",
+        "nursery rhymes"
+      ]
+    },
+    "navidad": {
+      "tema": "Navidad",
+      "nombres": [
+        "navidad",
+        "navidena",
+        "christmas",
+        "holiday",
+        "christmas music"
+      ],
+      "subgeneros": [
+        "villancicos",
+        "carols",
+        "christmas carols"
+      ]
     },
     "religiosa": {
-      "nombres": ["religiosa", "cristiana", "musica cristiana", "christian", "christian music", "gospel", "christian & gospel"],
-      "subgeneros": ["worship", "alabanza", "christian rock", "ccm", "contemporary christian", "sacred", "sacra", "spiritual", "himnos", "hymns", "gospel music"]
+      "tema": "Cristiana / Gospel",
+      "nombres": [
+        "cristiana",
+        "musica cristiana",
+        "religiosa",
+        "christian",
+        "christian music",
+        "gospel",
+        "christian and gospel",
+        "cristiana gospel"
+      ],
+      "subgeneros": [
+        "worship",
+        "alabanza",
+        "christian rock",
+        "ccm",
+        "contemporary christian",
+        "sacred",
+        "sacra",
+        "himnos",
+        "hymns",
+        "gospel music"
+      ]
     },
     "experimental": {
-      "nombres": ["experimental", "avant garde", "avant-garde", "vanguardia"],
-      "subgeneros": ["noise", "musique concrete", "sound art", "drone", "free improvisation", "improvisacion libre", "lowercase", "plunderphonics", "field recordings"]
+      "tema": "Experimental",
+      "nombres": [
+        "experimental",
+        "avant garde",
+        "vanguardia"
+      ],
+      "subgeneros": [
+        "noise",
+        "musique concrete",
+        "sound art",
+        "drone",
+        "free improvisation",
+        "plunderphonics",
+        "field recordings"
+      ]
     },
     "new age": {
-      "nombres": ["new age", "relajacion", "relax", "meditacion", "meditation"],
-      "subgeneros": ["healing", "spa", "nature sounds", "sonidos de la naturaleza", "yoga", "sleep", "mindfulness"]
+      "tema": "New Age",
+      "nombres": [
+        "new age",
+        "relajacion",
+        "relax",
+        "meditacion",
+        "meditation"
+      ],
+      "subgeneros": [
+        "healing",
+        "spa",
+        "nature sounds",
+        "yoga",
+        "sleep",
+        "mindfulness"
+      ]
     }
-  },
-  "cercanas": {
-    "metal": ["rock"],
-    "folk": ["country", "rock"],
-    "country": ["folk"],
-    "blues": ["jazz", "rnb soul", "rock"],
-    "rnb soul": ["hip hop", "jazz", "pop"],
-    "hip hop": ["rnb soul"],
-    "experimental": ["electronica", "rock", "clasica"],
-    "new age": ["electronica", "clasica", "world"],
-    "reggae": ["latina", "world"],
-    "world": ["folk", "latina"],
-    "electronica": ["pop"],
-    "pop": ["rock", "electronica"],
-    "rock": ["pop", "metal"],
-    "jazz": ["blues", "rnb soul"],
-    "clasica": ["bandas sonoras"],
-    "bandas sonoras": ["clasica"],
-    "infantil": ["pop"],
-    "religiosa": ["pop"],
-    "latina": ["world", "pop"]
   }
 }

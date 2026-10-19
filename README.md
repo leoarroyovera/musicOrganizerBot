@@ -53,17 +53,22 @@ En cada tema (o en todo el chat, si el grupo no tiene Temas) los mensajes se rec
 
 ### Cómo se decide el tema
 
-En este orden, y en cuanto un paso da un tema se usa ese:
+El tema es el **género que devuelven las búsquedas**. Cada tema de WAV/FLAC corresponde a una familia de `generos.json` (Dance - Electrónica, Pop, Pop Latino, Cumbia y Tropical, Rock, Rock en Español, Alternativo, Hip Hop / Rap, Romántico, OST…).
 
-1. **Lo aprendido**: si ya elegiste un tema para ese artista, va ahí.
-2. **Etiquetas y caption**: el género de las etiquetas de los audios, hashtags (`#rock`) y líneas `Género: …` del caption.
-3. **Búsqueda online gratuita**: MusicBrainz, Deezer e iTunes, primero por álbum y si no por artista.
-4. **Claude con búsqueda web** (solo si configuraste `ANTHROPIC_API_KEY`): investiga el álbum y elige el tema más cercano de la lista. Responde "ninguno" si no encuentra nada confiable.
-5. **Pendiente**: te llega un mensaje con los géneros encontrados y botones con todos los temas (más "➕ Crear tema «género»", "🔍 Buscar de nuevo", "🗑 Descartar" y "🌐 Buscar en Google", que abre una búsqueda con el artista y el álbum para que veas su género). Si no hubo conexión para buscar, el mensaje lo dice.
+1. **Fuentes**: MusicBrainz, Deezer e iTunes (primero por álbum y, si no lo encuentran, por artista), las etiquetas de los audios y el caption (`#rock`, `Género: …`). En los compilados sin artista también cuenta el título ("Flash House 3", "18 Lentos Históricos"), y en cualquier disco un título de banda sonora ("Music From The Motion Picture"). Un compilado sin artista solo se toma de las búsquedas si el disco encontrado es de "Various Artists" y con el mismo título.
+2. **Votación**: cada fuente vota una vez, por la familia que más aparece en su lista.
+   - Las etiquetas muy amplias ("Pop") valen medio voto, y también la fuente que encontró solo al artista, porque puede ser otro con el mismo nombre.
+   - Si una fuente nombra una variante latina o regional ("rock, latin rock"), vota por esa variante.
+   - En un empate ganan las familias latinas y regionales; después, MusicBrainz.
+3. **Tema**: el de esa familia que ya exista en el grupo, con su nombre de `tema` o cualquiera de sus `nombres` (así "Pop en Español" cuenta como Pop Latino). Si el disco menciona un subgénero que tiene su propio tema (por ejemplo "Salsa"), va a ese. **Si no existe ningún tema para la familia, el bot lo crea.**
+4. **Claude con búsqueda web** (solo si configuraste `ANTHROPIC_API_KEY`): si ninguna fuente dio un género, investiga el álbum y elige la familia.
+5. **Sin género**: si ya elegiste antes un tema para ese artista, va ahí. Si no, queda **pendiente**. Te llega un mensaje con botones con todos los temas, más "➕ Crear tema «género»", "🔍 Buscar de nuevo", "🗑 Descartar" y "🌐 Buscar en Google", que abre una búsqueda con el artista y el álbum. Si no hubo conexión para buscar, el mensaje lo dice. `/rebuscar` vuelve a buscar el género de todos los pendientes y publica los que encuentra.
 
-Para emparejar un género con un tema se usa `generos.json`: familias (rock, metal, electrónica, latina…) con sus nombres y subgéneros en inglés y español. Así `shoegaze` cae en el tema "Rock", `bachata` en "Música Latina" y, si no hay un tema de metal, `death metal` va al de rock (familias "cercanas"). Cada género encontrado vota, y gana el tema con más votos. Si tus temas tienen nombres que no figuran ahí, agregalos a `generos.json` y reiniciá el bot.
+Los temas que no son un género (Radio, Oldies, Bailable, 70 & 80…) solo reciben lo que elegís a mano. `/temas` muestra a qué familia corresponde cada tema y cuáles se van a crear.
 
-**Para que haya cada vez menos pendientes**, cuando elegís un tema el bot aprende: el artista y los géneros de ese álbum van a ese tema la próxima vez. Lo aprendido se ve con `/aprendido`, se corrige con `/olvidar` y se carga a mano con `/mapear`.
+**Para que haya cada vez menos pendientes**, cuando elegís el tema de un pendiente el bot recuerda el artista, pero solo para cuando tampoco encuentre su género. Con `/mapear artista X = Tema` el artista va siempre a ese tema, gane el género que gane. Con `/mapear genero X = Tema` un género que no está en `generos.json` va a ese tema. Lo aprendido se ve con `/aprendido` y se corrige con `/olvidar`. Los géneros que la versión anterior "aprendía" sola de los pendientes ya no se usan, porque mandaban por ejemplo "rock" a Oldies y "reggae" a Dance.
+
+Si un género o un nombre de tema no figura en `generos.json`, agregalo ahí y reiniciá el bot.
 
 ### Duplicados y reanudación
 
@@ -81,12 +86,13 @@ También aparecen en el botón **Menú** de Telegram, y `/menu` los muestra como
 | `/analizar <link>` | Lista los álbumes que encontraría y a qué tema irían, sin descargar ni enviar nada. Sin etiquetas (no descarga) y sin Claude, así que algunos pueden aparecer con ❓ y resolverse igual al organizar. |
 | `/actualizar` | Revisa lo nuevo de una fuente ya organizada, o de todas. |
 | `/pendientes` | Muestra los álbumes que esperan que elijas el tema (o que fallaron, con botón para reintentar). |
+| `/rebuscar` | Vuelve a buscar el género de todos los pendientes (sin descargarlos); los que encuentra los descarga y publica. Al final manda un resumen. |
 | `/estado` | Tarea en curso y tareas en cola. |
 | `/cancelar` | Cancela la tarea en curso. Lo ya enviado queda y la próxima vez sigue desde ahí. |
 | `/fuentes` | Grupos organizados con sus números (enviados, duplicados, pendientes, errores) y la última corrida. |
-| `/temas` | Temas de WAV/FLAC (relee la lista) y la familia de géneros que detecté en cada uno. |
-| `/aprendido` | Artistas y géneros aprendidos y a qué tema van. |
-| `/mapear artista\|genero <nombre> = <tema>` | Asigna a mano, p.ej. `/mapear artista Soda Stereo = Rock en Español`. |
+| `/temas` | Temas de WAV/FLAC (relee la lista), la familia de géneros de cada uno y los que se crearán cuando haga falta. |
+| `/aprendido` | Artistas (asignados a mano o elegidos en pendientes) y géneros asignados a mano. |
+| `/mapear artista\|genero <nombre> = <tema>` | Asigna a mano. Un artista mapeado gana sobre el género (`/mapear artista Soda Stereo = Rock en Español`); un género mapeado sirve para los que no están en `generos.json`. |
 | `/olvidar artista\|genero <nombre>` | Borra algo aprendido. |
 | `/logs [n]` | Últimas `n` líneas (default 30) del log. |
 | `/ayuda` | Cómo funciona y la lista de comandos. |
@@ -105,7 +111,7 @@ Las tareas corren de a una; si mandás otro link mientras trabaja, queda en cola
 | `ZIP_MAX_MB` | límite de subida | Si el ZIP lo supera se parte en `_parte1.zip`, `_parte2.zip`… |
 | `MARGEN_DISCO_MB` | 500 | Espacio libre mínimo a dejar en disco. Cada álbum necesita en `tmp/` el doble de su tamaño. |
 | `CONTACTO_MUSICBRAINZ` | vacío | Email o URL para el User-Agent; MusicBrainz lo pide y limita menos con contacto. |
-| `ANTHROPIC_API_KEY` | vacío | Activa el paso de Claude. Se cobra por uso; solo se llama para los álbumes que las búsquedas gratuitas no resolvieron. |
+| `ANTHROPIC_API_KEY` | vacío | Activa el paso de Claude. Se cobra por uso; solo se llama para los álbumes sin género en las búsquedas gratuitas. |
 | `BUSQUEDA_CLAUDE` | automático | `0` apaga Claude aunque haya clave. |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Modelo para ese paso. |
 
@@ -117,7 +123,7 @@ En `data/` (no se sube al repo):
 fuentes/<id>.json      checkpoint y números por grupo origen
 pendientes.json        álbumes esperando tema o reintento
 enviados.json          álbumes ya publicados (evita duplicados)
-aprendido.json         artista -> tema y género -> tema
+aprendido.json         artista -> tema y género -> tema (/mapear)
 cache_busquedas.json   resultados de MusicBrainz/Deezer/iTunes
 ```
 

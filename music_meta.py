@@ -190,18 +190,40 @@ def peek_zip(zip_path, work_dir, audio_exts) -> tuple[dict, Path | None]:
 # ---------- captions y nombres ----------
 
 
+def _clean_line(line: str) -> str:
+    line = re.sub(r"\[[^\]]*\]|\{[^}]*\}", " ", line)  # [FLAC 24-96] etc.
+    line = re.sub(r"[*_`🎵💿📀🎶]|#\S+", "", line)
+    line = FORMAT_WORDS_RE.sub(" ", line)
+    # "(FLAC)" sin el FLAC deja "( )", que despues duplicaba el año en el nombre.
+    line = re.sub(r"\(\s*\)", " ", line)
+    return re.sub(r"\s+", " ", line).strip(" -–—|")
+
+
 def parse_name(text: str) -> AlbumInfo | None:
     """"Artista - Album (Año)" en alguna linea del texto."""
     for line in (text or "").splitlines():
-        line = re.sub(r"\[[^\]]*\]|\{[^}]*\}", " ", line)  # [FLAC 24-96] etc.
-        line = re.sub(r"[*_`🎵💿📀🎶]|#\S+", "", line)
-        line = FORMAT_WORDS_RE.sub(" ", line).strip(" -–—|")
+        line = _clean_line(line)
         m = PATTERN.search(line)
         # "01 - Tema.flac" no es "Artista - Album".
         if m and len(m["album"].strip()) > 1 and not m["artist"].strip().isdigit():
             album = re.sub(r"\s*\((?:19|20)\d{2}\)\s*$", "", m["album"]).strip()
             year = m["year"] or (YEAR_RE.search(m["album"]).group(0) if YEAR_RE.search(m["album"]) else None)
             return AlbumInfo(m["artist"].strip(), album, year)
+    return None
+
+
+TITLE_YEAR_RE = re.compile(r"^(?P<title>.*?[A-Za-zÀ-ÿ].*?)[\s(\[-]*(?P<year>(?:19|20)\d{2})[)\]]?$")
+
+
+def parse_title(text: str) -> AlbumInfo | None:
+    """Compilados sin artista: "Zona De Baile (1992) (FLAC)" -> album "Zona
+    De Baile", 1992. Solo si hay un año, para no tomar cualquier texto."""
+    for line in (text or "").splitlines():
+        m = TITLE_YEAR_RE.search(_clean_line(line))
+        if m:
+            title = m["title"].strip(" -–—|(.")
+            if len(title) >= 3:
+                return AlbumInfo(None, title, m["year"])
     return None
 
 
@@ -240,5 +262,10 @@ def info_from_texts(texts: list[str], filenames: list[str], performers: list[str
         info = parse_name(stem_for_parse(filenames[0]))
         if info:
             info.genres = genres
+            return info
+    for t in texts + [stem_for_parse(f) for f in filenames[:1] if len(filenames) == 1]:
+        info = parse_title(t)
+        if info:
+            info.artist, info.genres = _majority(performers), genres
             return info
     return AlbumInfo(artist=_majority(performers), genres=genres)

@@ -1,21 +1,36 @@
-"""Empareja generos musicales con los temas del grupo destino.
+"""Decide la familia de generos de un album y el tema de WAV/FLAC que le toca.
 
-Cada genero candidato (de etiquetas, captions o busquedas online) vota por
-el tema que mejor le corresponde:
-  100  mismo nombre ("Rock" == "rock")
-   90  uno contiene al otro ("alternative rock" -> tema "Rock")
-   70  misma familia y el tema es el generico ("shoegaze" -> tema "Rock";
-       66 si el generico tiene mas palabras, como "Rock en Español")
-   60  nombre parecido (errores de tipeo)
-   40  misma familia pero el tema es de un subgenero ("bachata" -> tema "Salsa")
-   25  familia cercana ("metal" -> tema "Rock" si no hay tema de metal)
-Gana el tema con mas puntos sumando todos los candidatos (cada uno con un
-peso segun de donde salio)."""
-import difflib
+Cada fuente (MusicBrainz, Deezer, iTunes, etiquetas/caption, Claude) da una
+lista de generos. Cada fuente vota una sola vez, por la familia que mas
+aparece en su lista (los primeros generos pesan mas). Las etiquetas muy
+amplias de generos.json ("Pop", "Latin") valen medio voto. Gana la familia
+con mas votos; ante un empate, la de la fuente mas confiable (MusicBrainz
+primero, porque sus generos son por album y votados por la comunidad),
+salvo que una de las empatadas este en "ganan_empates" (las familias latinas
+y regionales son mas precisas que "Pop" o "Rock"). Una fuente que encontro
+al artista pero no al album vale medio voto: puede ser otro artista con el
+mismo nombre.
+
+El tema es el de esa familia: uno de subgenero si el album lo menciona
+("Salsa"), si no el generico ("Cumbia y Tropical" o cualquiera de sus
+nombres); si no hay ninguno, el bot lo crea con el nombre de "tema"."""
 import json
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
+
+# Desempate entre fuentes: primero la mas confiable.
+SOURCE_PRIORITY = ["manual", "musicbrainz", "deezer", "itunes", "etiquetas", "titulo", "claude"]
+WEAK_VOTE = 0.5
+MAPPED = "tema:"  # familia "virtual" de un genero que mapeaste a mano a un tema
+ARTIST_SUFFIX = " (artista)"  # fuente que solo encontro al artista, no al album
+
+
+def _source_rank(source: str) -> int:
+    base = source.removesuffix(ARTIST_SUFFIX)
+    rank = SOURCE_PRIORITY.index(base) if base in SOURCE_PRIORITY else len(SOURCE_PRIORITY)
+    return rank + (len(SOURCE_PRIORITY) if source.endswith(ARTIST_SUFFIX) else 0)
 
 
 def norm(text: str) -> str:
@@ -34,122 +49,131 @@ class Topic:
     id: int
     title: str
     norm: str
-    generic: set = field(default_factory=set)   # familias para las que es el tema generico
-    primary: set = field(default_factory=set)   # ...y se llama exactamente como la familia ("Rock")
-    specific: set = field(default_factory=set)  # familias de las que es un subgenero
+    family: str | None = None  # None: tema que el bot no llena solo (Radio, Oldies…)
+    generic: bool = False      # se llama como la familia (no como un subgenero)
+    phrase: str = ""           # la frase de generos.json que reconoci en el titulo
 
 
 @dataclass
-class Match:
-    topic: Topic
-    genre: str   # el candidato que mas aporto
-    score: float
+class Verdict:
+    family: str           # clave de generos.json, o "tema:<id>" si fue un mapeo manual
+    genre: str            # el genero que mas aporto (para el caption)
+    votes: dict = field(default_factory=dict)  # fuente -> (familia, genero, peso)
 
 
 class Matcher:
     def __init__(self, path: str):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        self.related = data.get("cercanas", {})
-        # (frase normalizada, familia, es_nombre_generico), largas primero
+        self.families = data["familias"]
+        self.weak = {norm(w) for w in data.get("debiles", [])}
+        self.tie_pref = data.get("ganan_empates", [])
+        self.regional = set(data.get("regionales", []))
+        # "Latin" a secas dice que el disco es latino, no de que estilo: no
+        # alcanza para la regla de "regionales".
+        self.umbrella = {norm(w) for w in data.get("paraguas", [])}
         phrases = []
-        for fam, d in data["familias"].items():
-            for p in [fam] + d.get("nombres", []):
+        for fam, d in self.families.items():
+            for p in [fam, d.get("tema", fam)] + d.get("nombres", []):
                 phrases.append((norm(p), fam, True))
             for p in d.get("subgeneros", []):
                 phrases.append((norm(p), fam, False))
-        # Nombre principal de cada familia: desempata entre "Rock" y "Rock en
-        # Español" cuando el genero solo dice la familia ("shoegaze").
-        self.primary_names = {fam: {norm(fam)} | {norm(n) for n in d.get("nombres", [])[:1]}
-                              for fam, d in data["familias"].items()}
         seen, self.phrases = set(), []
         for p in sorted(phrases, key=lambda x: -len(x[0])):
-            if p[0] and (p[0], p[1]) not in seen:
-                seen.add((p[0], p[1]))
+            if p[0] and p[0] not in seen:  # la primera familia que la declara se la queda
+                seen.add(p[0])
                 self.phrases.append(p)
 
-    def _hits(self, text: str):
-        padded = f" {text} "
+    def theme_name(self, family: str) -> str:
+        return self.families[family].get("tema", family.title())
+
+    def match(self, text: str):
+        """(frase, familia, es_nombre) de la frase conocida mas larga que
+        contiene `text`; a igual largo, la de mas a la derecha ("indie pop")."""
+        padded, best = f" {text} ", None
         for phrase, fam, is_name in self.phrases:
             pos = padded.find(f" {phrase} ")
-            if pos >= 0:
-                yield pos, len(phrase), fam, is_name
+            if pos >= 0 and (best is None or (len(phrase), pos) > (len(best[0]), best[3])):
+                best = (phrase, fam, is_name, pos)
+        return best[:3] if best else None
 
     def family_of(self, genre: str) -> str | None:
-        """Familia de un genero: la frase conocida mas larga que contiene; a
-        igual largo, la de mas a la derecha ("indie pop" -> pop)."""
-        best = None
-        for pos, length, fam, _ in self._hits(norm(genre)):
-            if best is None or (length, pos) > (best[0], best[1]):
-                best = (length, pos, fam)
-        return best[2] if best else None
+        hit = self.match(norm(genre))
+        return hit[1] if hit else None
 
     def index_topics(self, topics: list[tuple[int, str]]) -> list[Topic]:
         out = []
         for tid, title in topics:
             t = Topic(tid, title, norm(title))
-            for _, _, fam, is_name in self._hits(t.norm):
-                (t.generic if is_name else t.specific).add(fam)
-            t.specific -= t.generic
-            t.primary = {fam for fam in t.generic if t.norm in self.primary_names[fam]}
+            hit = self.match(t.norm)
+            if hit:
+                t.phrase, t.family, t.generic = hit
             out.append(t)
         return out
 
-    def score(self, genre: str, topic: Topic) -> int:
-        g, t = norm(genre), topic.norm
-        if not g or not t:
-            return 0
-        if g == t:
-            return 100
-        fam = self.family_of(g)
-        if len(g) >= 3 and len(t) >= 3 and (_contains(t, g) or _contains(g, t)):
-            # "latin pop" contiene "pop", pero es de la familia latina: si el
-            # tema es de otra familia vale menos que el tema "Latina".
-            if fam and (topic.generic or topic.specific) and fam not in topic.generic | topic.specific:
-                return 50
-            return 90
-        if fam and fam in topic.generic:
-            return 70 if fam in topic.primary else 66
-        if difflib.SequenceMatcher(None, g, t).ratio() >= 0.85:
-            return 60
-        if fam and fam in topic.specific:
-            return 40
-        related = self.related.get(fam, []) if fam else []
-        if any(rel in topic.primary for rel in related):
-            return 25
-        if any(rel in topic.generic for rel in related):
-            return 22
-        return 0
+    # ---------- votacion ----------
 
-    def best(self, candidates: list[tuple[str, float]], topics: list[Topic],
-             learned: dict | None = None) -> Match | None:
-        """`candidates`: [(genero, peso)]. `learned`: {genero_normalizado:
-        topic_id} de lo que respondiste antes (pesa mas que cualquier regla)."""
-        learned = learned or {}
-        by_id = {t.id: t for t in topics}
-        totals, top_single, reason = {}, {}, {}
-        for genre, weight in candidates:
-            tid = learned.get(norm(genre))
-            if tid in by_id:
-                scored = [(120, by_id[tid])]
-            else:
-                scored = [(self.score(genre, t), t) for t in topics]
-                scored = [(s, t) for s, t in scored if s > 0]
-            if not scored:
+    def classify(self, evidence: list[tuple[str, list[str]]], mapped: dict | None = None) -> Verdict | None:
+        """`evidence`: [(fuente, [generos en orden])]. `mapped`: {genero
+        normalizado: topic_id} de /mapear genero."""
+        mapped = mapped or {}
+        totals, votes = Counter(), {}
+        for source, genres in evidence:
+            scores, first, strong, specific = Counter(), {}, set(), set()
+            for i, genre in enumerate(genres):
+                key = norm(genre)
+                fam = f"{MAPPED}{mapped[key]}" if key in mapped else self.family_of(genre)
+                if not fam:
+                    continue
+                weak = key in self.weak
+                scores[fam] += max(1 - 0.15 * i, 0.2) * (WEAK_VOTE if weak else 1)
+                first.setdefault(fam, genre)
+                if not weak:
+                    strong.add(fam)
+                if key not in self.umbrella:
+                    specific.add(fam)
+            if not scores:
                 continue
-            top = max(s for s, _ in scored)
-            for s, t in scored:
-                if s != top:
-                    continue  # cada genero vota solo por su(s) mejor(es) tema(s)
-                totals[t.id] = totals.get(t.id, 0) + s * weight
-                if s > top_single.get(t.id, 0):
-                    top_single[t.id], reason[t.id] = s, genre
+            fam = max(scores, key=lambda f: (scores[f], f in strong))
+            # "rock, latin rock" o "Rock, Rock Latino": la variante regional es
+            # la que dice de que disco se trata, aunque venga despues.
+            regional = [f for f in scores if f in self.regional and f in specific]
+            if regional:
+                fam = max(regional, key=lambda f: scores[f])
+            weight = 1 if fam in strong else WEAK_VOTE
+            if source.endswith(ARTIST_SUFFIX):
+                weight *= WEAK_VOTE  # generos del artista: puede ser otro con el mismo nombre
+            if any(f.startswith(MAPPED) for f in scores):
+                fam = next(f for f in scores if f.startswith(MAPPED))
+                weight = 100  # un genero mapeado a mano manda
+            totals[fam] += weight
+            votes[source] = (fam, first[fam], weight)
         if not totals:
             return None
-        ranking = sorted(totals, key=lambda tid: (totals[tid], top_single[tid]), reverse=True)
-        first = ranking[0]
-        if len(ranking) > 1:
-            second = ranking[1]
-            if (totals[second], top_single[second]) == (totals[first], top_single[first]):
-                return None  # empate real: mejor preguntar
-        return Match(by_id[first], reason[first], totals[first])
+        top = max(totals.values())
+        tied = [f for f, n in totals.items() if abs(n - top) < 1e-9]
+
+        def rank(fam):
+            pref = self.tie_pref.index(fam) if fam in self.tie_pref else len(self.tie_pref)
+            return pref, min(_source_rank(s) for s, v in votes.items() if v[0] == fam)
+
+        winner = min(tied, key=rank)
+        genre = next(v[1] for s, v in sorted(votes.items(), key=lambda kv: _source_rank(kv[0]))
+                     if v[0] == winner)
+        return Verdict(winner, genre, votes)
+
+    def topic_for(self, verdict: Verdict, all_genres: list[str], topics: list[Topic]) -> Topic | None:
+        """Tema existente para el veredicto, o None si hay que crearlo."""
+        if verdict.family.startswith(MAPPED):
+            tid = int(verdict.family[len(MAPPED):])
+            return next((t for t in topics if t.id == tid), None)
+        same = [t for t in topics if t.family == verdict.family]
+        genres = [norm(g) for g in all_genres]
+        specific = [t for t in same if not t.generic and any(_contains(g, t.phrase) for g in genres)]
+        if specific:
+            return max(specific, key=lambda t: len(t.phrase))
+        generic = [t for t in same if t.generic]
+        if not generic:
+            return None
+        theme = norm(self.theme_name(verdict.family))
+        return next((t for t in generic if t.norm == theme), generic[0])
