@@ -261,6 +261,17 @@ class Organizer:
                 by_source.setdefault(key, []).append(genre)
             if by_source:
                 return evidence + list(by_source.items()), False
+        # "Christina_Aguilera_Keeps_Gettin'_Better.zip": sin " - " no se sabe
+        # donde termina el artista; las busquedas por texto libre lo dicen.
+        raw = None if info.artist else (info.raw or info.album)
+        if raw:
+            split = await self.lookup.split_title(raw)
+            if split == "offline":
+                return evidence, True
+            if split:
+                self.log(f"  «{raw}» → artista «{split[0]}», álbum «{split[1]}»")
+                info.artist, info.album, info.raw = split[0], split[1], None
+                return await self._evidence(info)
         return evidence, offline
 
     async def resolve_topic(self, info: AlbumInfo, filenames, use_claude=True, allow_create=True) -> Resolution:

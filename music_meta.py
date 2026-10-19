@@ -34,6 +34,9 @@ class AlbumInfo:
     album: str | None = None
     year: str | None = None
     genres: list[str] = field(default_factory=list)  # de etiquetas o captions
+    # Texto sin separar ("Christina Aguilera Keeps Gettin' Better"): si no hay
+    # artista, las busquedas intentan deducir donde termina el artista.
+    raw: str | None = None
 
     @property
     def name(self) -> str | None:
@@ -46,7 +49,7 @@ class AlbumInfo:
         """Completa lo que falte con `other` (self tiene prioridad)."""
         genres = self.genres + [g for g in other.genres if g not in self.genres]
         return AlbumInfo(self.artist or other.artist, self.album or other.album,
-                         self.year or other.year, genres)
+                         self.year or other.year, genres, self.raw or other.raw)
 
 
 def split_genres(text: str) -> list[str]:
@@ -195,7 +198,8 @@ LEADING_YEAR_RE = re.compile(r"^\(?(?P<year>(?:19|20)\d{2})\)?\s*[.\-–—:]\s*
 
 def _clean_line(line: str) -> str:
     line = re.sub(r"\[[^\]]*\]|\{[^}]*\}", " ", line)  # [FLAC 24-96] etc.
-    line = re.sub(r"[*_`🎵💿📀🎶]|#\S+", "", line)
+    # "Christina_Aguilera_-_Stripped": el guion bajo separa palabras.
+    line = re.sub(r"[*`🎵💿📀🎶]|#\S+", "", line).replace("_", " ")
     line = FORMAT_WORDS_RE.sub(" ", line)
     # "(FLAC)" sin el FLAC deja "( )", que despues duplicaba el año en el nombre.
     line = re.sub(r"\(\s*\)", " ", line)
@@ -249,8 +253,30 @@ def stem_for_parse(filename: str) -> str:
     return stem.replace("_", " ")
 
 
+RAW_WORDS = (2, 15)  # largo (en palabras) de un texto que puede ser "Artista Album"
+
+
+def raw_title(texts: list[str], filenames: list[str]) -> str | None:
+    """Nombre de un comprimido o primera linea de un caption, tal cual, para
+    cuando no tiene la forma "Artista - Album"."""
+    candidates = [stem_for_parse(f) for f in filenames[:1] if len(filenames) == 1]
+    candidates += [next((ln for ln in t.splitlines() if ln.strip()), "") for t in texts[:1]]
+    for text in candidates:
+        text = _clean_line(text)
+        if RAW_WORDS[0] <= len(text.split()) <= RAW_WORDS[1] and re.search(r"[A-Za-zÀ-ÿ]", text):
+            return text
+    return None
+
+
 def info_from_texts(texts: list[str], filenames: list[str], performers: list[str]) -> AlbumInfo:
     """Lo que se puede deducir sin descargar nada."""
+    info = _info_from_texts(texts, filenames, performers)
+    if not info.artist:
+        info.raw = raw_title(texts, filenames)
+    return info
+
+
+def _info_from_texts(texts, filenames, performers) -> AlbumInfo:
     genres = []
     for t in texts:
         genres += [g for g in genres_from_text(t) if g not in genres]

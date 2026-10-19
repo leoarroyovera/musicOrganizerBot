@@ -164,6 +164,56 @@ class GenreLookup:
                 return [item["primaryGenreName"]], True, None
         return [], False, None
 
+    # ---------- texto sin separar ----------
+
+    @staticmethod
+    def _split_match(text: str, artist: str, title: str) -> bool:
+        """El texto es "Artista Album" (o "Album Artista") con esos nombres."""
+        a, t, want = norm(artist), norm(title), norm(text)
+        if not a or not t or a in VARIOUS:
+            return False
+        return any(difflib.SequenceMatcher(None, want, joined).ratio() >= 0.9
+                   for joined in (f"{a} {t}", f"{t} {a}"))
+
+    async def split_title(self, text: str):
+        """(artista, album) para un nombre sin " - " ("Christina Aguilera
+        Keeps Gettin' Better; A Decade of Hits"): se busca el texto entero en
+        Deezer e iTunes y se acepta un disco cuyo artista + titulo sea ese
+        texto. None si no aparece; "offline" si no respondio nadie."""
+        key = f"split|{norm(text)}"
+        cached = self.store.lookup_cache.get(key)
+        if isinstance(cached, dict):
+            return (cached["artista"], cached["album"]) if cached.get("artista") else None
+
+        async def deezer():
+            data = await self._get("https://api.deezer.com/search/album", q=text, limit=10)
+            if "error" in data:
+                raise httpx.HTTPError(f"deezer: {data['error']}")
+            return [(i.get("artist", {}).get("name", ""), i.get("title", "")) for i in data.get("data", [])]
+
+        async def itunes():
+            data = await self._get("https://itunes.apple.com/search", term=text,
+                                   media="music", entity="album", limit=10)
+            return [(i.get("artistName", ""), i.get("collectionName", "")) for i in data.get("results", [])]
+
+        outcomes = await asyncio.gather(deezer(), itunes(), return_exceptions=True)
+        failed = [o for o in outcomes if isinstance(o, Exception)]
+        for o in failed:
+            print(f"  [busqueda] separar {text!r} fallo: {o!r}")
+        found = None
+        for outcome in outcomes:
+            if isinstance(outcome, Exception):
+                continue
+            found = next(((a, t) for a, t in outcome if self._split_match(text, a, t)), None)
+            if found:
+                break
+        if found or not failed:
+            self.store.lookup_cache[key] = {"artista": found and found[0], "album": found and found[1]}
+            self.store.save_lookup_cache()
+        if not found and len(failed) == len(outcomes):
+            return "offline"
+        return found
+
     # ---------- api ----------
 
     async def lookup(self, artist: str | None, album: str | None) -> LookupResult:

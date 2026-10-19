@@ -118,7 +118,7 @@ def from_filenames(names) -> str | None:
     (Año)" en su nombre (p.ej. "Artista - Album (2001) - 01 - Tema.mp3")."""
     found = []
     for name in names:
-        stem = os.path.splitext(os.path.basename(name))[0]
+        stem = os.path.splitext(os.path.basename(name))[0].replace("_", " ")
         # Se prueba cortando por " - " desde el final hasta encontrar el año.
         parts = re.split(r"\s+[-–—]\s+", stem)
         guess = None
