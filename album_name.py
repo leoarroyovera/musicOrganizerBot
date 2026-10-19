@@ -25,6 +25,8 @@ VARIOUS = "Varios artistas"
 
 def clean_name(text: str) -> str:
     """Nombre de archivo valido (sin .zip ni caracteres prohibidos)."""
+    # "Album: Subtitulo" -> "Album - Subtitulo" (":" no vale en un nombre de archivo).
+    text = re.sub(r"\s*:\s+", " - ", text)
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", text).strip()
     if name.lower().endswith(".zip"):
         name = name[:-4]

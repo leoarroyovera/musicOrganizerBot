@@ -561,8 +561,11 @@ class Organizer:
             name = (clean_name(info.name) if info.name else None) or guess_album_name(paths, texts) \
                 or f"album_{msgs[0].id}"
             ref = sub.to_ref() if len(groups) > 1 else unit.to_ref()
+            had_artist = bool(info.artist)
             topic, res = await self._choose(entity, source_title, ref, name, info,
                                             [p.name for p in paths], key, forced)
+            if not had_artist and info.artist:  # las busquedas separaron artista y album
+                name = clean_name(info.name)
             if topic is None:
                 outcomes.append(Outcome("pendiente", name, res.genres_seen and ", ".join(res.genres_seen[:5]) or ""))
                 continue
@@ -608,8 +611,11 @@ class Organizer:
             if zip_cover is None:
                 zip_cover = await asyncio.to_thread(extract_cover, images.sample, os.path.join(work, "muestra_cover"))
         name = clean_name(info.name) if info.name else first.stem
+        had_artist = bool(info.artist)
         topic, res = await self._choose(entity, source_title, unit.to_ref(), name, info,
                                         [p.name for _, p in downloaded], key, forced)
+        if not had_artist and info.artist:  # las busquedas separaron artista y album
+            name = clean_name(info.name)
         if topic is None:
             return Outcome("pendiente", name, ", ".join(res.genres_seen[:5]))
 
