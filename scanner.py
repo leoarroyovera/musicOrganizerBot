@@ -53,6 +53,29 @@ def kind_of(msg) -> str:
     return "otro"
 
 
+def describe(msg) -> str:
+    """Tipo de mensaje en palabras (para /diagnostico)."""
+    k = kind_of(msg)
+    if k != "otro":
+        return k
+    doc = msg.document
+    if doc is None:
+        return type(msg.media).__name__.removeprefix("MessageMedia").lower() if msg.media else "vacio"
+    for attr in doc.attributes:
+        if isinstance(attr, DocumentAttributeSticker):
+            return "sticker"
+        if isinstance(attr, DocumentAttributeAudio) and attr.voice:
+            return "nota de voz"
+    if msg.gif:
+        return "gif"
+    if msg.video:
+        return "video"
+    ext = _ext(msg.file.name or "") or (msg.file.ext or "").lstrip(".").lower()
+    if msg.audio or (doc.mime_type or "").startswith("audio/"):
+        return f"audio .{ext or '?'} (no esta en EXTENSIONES_AUDIO)"
+    return f"archivo .{ext or '?'}"
+
+
 def archive_base(name: str) -> str:
     return ARCHIVE_PART_RE.sub("", (name or "").lower())
 
@@ -78,6 +101,7 @@ class Unit:
     hints: list = field(default_factory=list)  # textos sueltos que lo presentan
     hint_ids: list = field(default_factory=list)
     base: str = ""
+    cut: str = ""  # por que termino este disco (para /diagnostico)
 
     @property
     def first_id(self):
@@ -200,6 +224,17 @@ def group_messages(msgs: list, gap: timedelta, forum: bool = False) -> list[Unit
             if continues:
                 cur.files.append(m)
                 continue
+            if cur:
+                if cur.kind != k:
+                    cur.cut = f"sigue un {k}"
+                elif loose:
+                    cur.cut = f"{len(loose)} imagen(es) en medio (ids {', '.join(str(i.id) for i in loose)})"
+                elif hint is not None:
+                    cur.cut = f"texto «{hint.message.splitlines()[0][:50]}» (id {hint.id})"
+                elif m.date - cur.last_date > gap:
+                    cur.cut = f"pausa de {int((m.date - cur.last_date).total_seconds() // 60)} min"
+                else:
+                    cur.cut = "otro comprimido"
             new = Unit(kind=k, files=[m], base=base)
             place_loose(new, m.date)
             if hint:
@@ -222,11 +257,13 @@ def group_messages(msgs: list, gap: timedelta, forum: bool = False) -> list[Unit
         place_loose(None)
         hint = None
         if cur:
+            cur.cut = f"{describe(m)} en medio (id {m.id})"
             units.append(cur)
             cur = None
 
     place_loose(None)
     if cur:
+        cur.cut = "ultimo mensaje leido"
         units.append(cur)
     _link_replies(units, [m for m in msgs if kind_of(m) == "imagen"], forum)
     return units
@@ -235,19 +272,26 @@ def group_messages(msgs: list, gap: timedelta, forum: bool = False) -> list[Unit
 async def scan(client, entity, min_id: int, forum: bool):
     """Mensajes con id > min_id, agrupados por hilo (tema) y en unidades.
     Devuelve (unidades ordenadas por primer mensaje, id del ultimo mensaje)."""
-    threads: dict[int, list] = {}
-    last_id = min_id
+    msgs, last_id = [], min_id
     async for msg in client.iter_messages(entity, reverse=True, min_id=min_id):
         last_id = max(last_id, msg.id)
-        if msg.action is not None:
-            continue
+        if msg.action is None:
+            msgs.append(msg)
+    units, _ = await scan_messages(msgs, forum)
+    return units, last_id
+
+
+async def scan_messages(msgs: list, forum: bool):
+    """Agrupa mensajes ya leidos (en orden) por hilo y en unidades."""
+    threads: dict[int, list] = {}
+    for msg in msgs:
         threads.setdefault(thread_of(msg, forum), []).append(msg)
     gap = timedelta(minutes=config.GAP_MINUTES)
     units = []
-    for msgs in threads.values():
-        units += group_messages(msgs, gap, forum)
+    for thread_msgs in threads.values():
+        units += group_messages(thread_msgs, gap, forum)
     units.sort(key=lambda u: u.first_id)
-    return units, last_id
+    return units, threads
 
 
 def summarize(units: list[Unit]) -> str:

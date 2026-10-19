@@ -37,7 +37,8 @@ BOT_COMMANDS = [
     BotCommand("aprendido", "Artistas y géneros asignados"),
     BotCommand("mapear", "Asignar a mano: /mapear artista|genero <nombre> = <tema>"),
     BotCommand("olvidar", "Borrar lo aprendido: /olvidar artista|genero <nombre>"),
-    BotCommand("logs", "Últimas líneas del log: /logs [n]"),
+    BotCommand("diagnostico", "Por qué se corta cada disco: /diagnostico <link> [desde] [n]"),
+    BotCommand("logs","Últimas líneas del log: /logs [n]"),
     BotCommand("ayuda", "Cómo funciona y lista de comandos"),
 ]
 
@@ -192,6 +193,24 @@ class OrganizerBot:
 
         dest = f" → {topic.title}" if topic else ""
         return Job(f"Pendiente #{pid} {entry.get('nombre', '')}{dest}", run)
+
+    def diagnose_job(self, link: str, start_id: int | None, limit: int) -> Job:
+        async def run(reporter):
+            entity, link_start = await resolve_chat(self.user, link)
+            reporter.header = f"🩺 {getattr(entity, 'title', link)}"
+            await reporter.set(f"leyendo {limit} mensajes…", force=True)
+            text = await self.org.diagnose(entity, start_id or link_start, limit)
+            if len(text) <= MAX_MESSAGE:
+                return text
+            os.makedirs(config.TMP_DIR, exist_ok=True)
+            path = os.path.join(config.TMP_DIR, "diagnostico.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            await self.bot.send_file(config.OWNER_ID, path, caption="🩺 Diagnóstico completo")
+            os.remove(path)
+            return text.split("\n\nDiscos armados:")[0][:300] + "\n…\n(detalle en el archivo)"
+
+        return Job(f"Diagnóstico {link}", run)
 
     def research_job(self, pids: list[int]) -> Job:
         """Vuelve a buscar el genero de los pendientes con lo que ya se sabe de
@@ -476,6 +495,17 @@ class OrganizerBot:
         ok = self.store.forget(kind, norm(m[2]))
         await event.respond("🗑 Olvidado." if ok else "No tenía eso aprendido.")
 
+    async def on_diagnose(self, event):
+        m = re.match(r"/diagnostico\s+(\S+)(?:\s+(\d+))?(?:\s+(\d+))?", event.raw_text.strip(), re.I)
+        if not m:
+            await event.respond("Uso: /diagnostico <link> [desde_id] [cantidad]\n"
+                                "Lista los mensajes como los ve el bot y por qué corta cada disco "
+                                "(default: los primeros 80). Con un link a un mensaje empieza ahí.")
+            return
+        start = int(m[2]) if m[2] else None
+        limit = min(int(m[3]) if m[3] else 80, 500)
+        await self.enqueue(self.diagnose_job(m[1], start, limit), event)
+
     async def on_research(self, event):
         pids = [e["id"] for e in self.store.pending["items"].values() if e["tipo"] == "tema"]
         if not pids:
@@ -601,6 +631,7 @@ class OrganizerBot:
             (self.on_update, r"^/actualizar\b"),
             (self.on_pending, r"^/pendientes\b"),
             (self.on_research, r"^/rebuscar\b"),
+            (self.on_diagnose, r"^/diagnostico\b"),
             (self.on_status, r"^/estado\b"),
             (self.on_cancel, r"^/cancelar\b"),
             (self.on_sources, r"^/fuentes\b"),

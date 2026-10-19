@@ -19,6 +19,7 @@ from telethon.tl.functions.messages import (
 from telethon.tl.types import (
     ChatInviteAlready,
     ChatInvitePeek,
+    DocumentAttributeAudio,
     MessageActionTopicCreate,
     PeerChannel,
 )
@@ -42,7 +43,7 @@ from media import (
     send_document,
 )
 from music_meta import AlbumInfo, extract_cover, info_from_tags, peek_zip, read_tags, split_by_album
-from scanner import Unit, scan, summarize
+from scanner import Unit, describe, reply_target, scan, scan_messages, summarize, thread_of
 from topic_match import ARTIST_SUFFIX, Matcher, Topic, norm
 
 INVITE_RE = re.compile(r"(?:t|telegram)\.me/(?:\+|joinchat/)([\w-]+)", re.I)
@@ -506,6 +507,9 @@ class Organizer:
         await reporter.set("🏷 leyendo etiquetas…", force=True)
         tags = await asyncio.to_thread(lambda: [read_tags(p) for _, p in downloaded])
         groups = split_by_album(list(zip(downloaded, tags)))
+        if len(groups) > 1:
+            albums = [next((t.get("album") for _, t in g if t.get("album")), "?") for g in groups]
+            self.log(f"  {unit.label()}: separado en {len(groups)} por etiquetas de álbum: {' | '.join(albums)}")
         guess = unit.guess()
         outcomes = []
         for gi, group in enumerate(groups):
@@ -637,6 +641,44 @@ class Organizer:
         if deferred:
             lines.append(f"⏸ {len(deferred)} álbum(es) muy recientes quedan para la próxima "
                          f"(menos de {config.MIN_AGE_MINUTES} min)")
+        return "\n".join(lines)
+
+    async def diagnose(self, entity, start_id: int | None, limit: int) -> str:
+        """Los primeros `limit` mensajes (desde `start_id`) tal como los ve el
+        escaner, y los discos que arma con el motivo de cada corte."""
+        forum = bool(getattr(entity, "forum", False))
+        title = getattr(entity, "title", None) or str(utils.get_peer_id(entity))
+        msgs = []
+        async for msg in self.user.iter_messages(entity, reverse=True, min_id=(start_id or 1) - 1, limit=limit):
+            if msg.action is None:
+                msgs.append(msg)
+        lines = [f"Diagnóstico de {title} — {len(msgs)} mensajes desde el id {msgs[0].id if msgs else '-'}",
+                 f"(foro: {'sí' if forum else 'no'}; pausa máxima entre temas: {config.GAP_MINUTES} min)", "",
+                 "id | +min | tema | remitente | tipo | álbum TG | archivo / caption"]
+        last_date = {}
+        for m in msgs:
+            th = thread_of(m, forum)
+            delta = f"+{(m.date - last_date[th]).total_seconds() / 60:.0f}" if th in last_date else "-"
+            last_date[th] = m.date
+            name = (m.file.name if m.file and m.file.name else "") or ""
+            extra = []
+            if m.document:
+                for attr in m.document.attributes:
+                    if isinstance(attr, DocumentAttributeAudio) and (attr.performer or attr.title):
+                        extra.append(f"[{attr.performer or '?'} - {attr.title or '?'}]")
+            caption = (m.message or "").splitlines()[0][:60] if m.message else ""
+            target = reply_target(m, forum)
+            reply = f" ↩{target}" if target else ""
+            lines.append(f"{m.id} | {delta} | {th} | {m.sender_id} | {describe(m)} | {m.grouped_id or ''} | "
+                         f"{name} {' '.join(extra)} {('«' + caption + '»') if caption else ''}{reply}".rstrip())
+        units, _ = await scan_messages(msgs, forum)
+        lines += ["", f"Discos armados: {len(units)}"]
+        for u in units:
+            ids = [f.id for f in u.files]
+            span = f"{ids[0]}–{ids[-1]}" if len(ids) > 1 else str(ids[0])
+            lines.append(f"• {u.kind} con {len(u.files)} archivo(s) [{span}] {u.label()}")
+            lines.append(f"   portadas seguras: {[c.id for c in u.covers]} · candidatas: "
+                         f"{[(c.id, side) for c, side in u.candidates]} · corte: {u.cut}")
         return "\n".join(lines)
 
     async def _analyze(self, title, ready, deferred, reporter) -> str:
