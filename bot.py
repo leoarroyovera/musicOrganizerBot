@@ -223,7 +223,8 @@ class OrganizerBot:
                     continue
                 await reporter.set(f"🔎 {i}/{len(pids)}: {entry['nombre']}")
                 info = parse_name(entry["nombre"]) or parse_title(entry["nombre"]) \
-                    or AlbumInfo(entry.get("artista"), entry.get("album"), entry.get("anio"))
+                    or AlbumInfo(entry.get("artista"), entry.get("album"), entry.get("anio"),
+                                 raw=entry["nombre"].replace("_", " "))
                 info.genres = list(entry.get("generos") or [])
                 res = await self.org.resolve_topic(info, [])
                 if res.topic is None:
