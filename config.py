@@ -30,6 +30,7 @@ PENDING_PATH = os.path.join(DATA_DIR, "pendientes.json")
 SENT_PATH = os.path.join(DATA_DIR, "enviados.json")
 LEARNED_PATH = os.path.join(DATA_DIR, "aprendido.json")
 LOOKUP_CACHE_PATH = os.path.join(DATA_DIR, "cache_busquedas.json")
+COVER_SIDES_PATH = os.path.join(DATA_DIR, "portadas.json")
 # Familias de generos y sinonimos para emparejar con los temas (editable).
 GENRES_PATH = "generos.json"
 
@@ -67,5 +68,10 @@ USER_AGENT = f"musicOrganizerBot/1.0 ( {MB_CONTACT} )" if MB_CONTACT else "music
 _claude = os.environ.get("BUSQUEDA_CLAUDE", "").strip()
 USE_CLAUDE = _claude == "1" or (_claude != "0" and bool(os.environ.get("ANTHROPIC_API_KEY")))
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5-5").strip()
+
+# Portada: "grupo" (default) usa la imagen del grupo si se verifica que es de
+# ese disco, y si no la que trae adentro o la de internet; "internet" usa
+# primero la de internet (mejor calidad) cuando se encuentra el album exacto.
+COVER_PREF = os.environ.get("PORTADA_PREFERIDA", "grupo").strip().lower()
 
 TOPICS_PER_PAGE = 8

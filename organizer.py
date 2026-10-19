@@ -27,6 +27,7 @@ import config
 import store as store_mod
 from album_name import clean_name, guess_album_name
 from claude_pick import ClaudeUnavailable, pick_family
+from covers import caption_verdict, image_hash, same_image
 from genre_lookup import WEIGHTS as SOURCE_WEIGHTS
 from genre_lookup import GenreLookup
 from media import (
@@ -49,6 +50,10 @@ PRIVATE_RE = re.compile(r"(?:t|telegram)\.me/c/(\d+)(?:/(\d+))?(?:/(\d+))?", re.
 PUBLIC_RE = re.compile(r"(?:(?:https?://)?(?:www\.)?(?:t|telegram)\.me/(?:s/)?|@)([A-Za-z]\w{3,})(?:/(\d+))?", re.I)
 GENERAL_TOPIC_ID = 1
 TITLE_FAMILIES_ALWAYS = {"bandas sonoras", "navidad"}
+# Costumbre de un grupo (portada antes o despues del ZIP): hacen falta al
+# menos estos casos verificados, y que esta proporcion sea del mismo lado.
+COVER_HABIT_MIN = 5
+COVER_HABIT_SHARE = 0.8
 # Album que es solo un numero de volumen: "2", "Volumen 4", "Vol. 3".
 SERIES_RE = re.compile(r"^(?:vol(?:umen|ume)?\s*)?\d+$")
 
@@ -69,6 +74,12 @@ class Resolution:
     genres_seen: list = field(default_factory=list)
     offline: bool = False
     create: str = ""  # en /analizar: el tema que se crearia
+
+
+@dataclass
+class Images:
+    strong: list = field(default_factory=list)      # [ruta] con vinculo seguro
+    candidates: list = field(default_factory=list)  # [(mensaje, lado, ruta)]
 
 
 @dataclass
@@ -147,6 +158,9 @@ class Organizer:
         # True mientras /rebuscar reprocesa pendientes: los que siguen sin
         # genero no mandan una tarjeta cada uno (va un resumen al final).
         self.silent = False
+        # (chat_id, id de imagen) ya verificadas como portada de un disco: no
+        # se ofrecen al vecino.
+        self.used_covers: set = set()
         self.topics: list[Topic] = []
         self.upload_limit = (config.MAX_UPLOAD_MB or 2000) * MIB
         self.zip_max = (config.ZIP_MAX_MB or config.MAX_UPLOAD_MB or 2000) * MIB
@@ -305,13 +319,15 @@ class Organizer:
         real_id, peer_cls = utils.resolve_id(entry["chat_id"])
         entity = await _entity_from_peer(self.user, peer_cls(real_id))
         ref = entry["ref"]
-        ids = ref["files"] + ref["covers"]
+        candidates = ref.get("candidates", [])
+        ids = ref["files"] + ref["covers"] + [i for i, _ in candidates]
         msgs = await self.user.get_messages(entity, ids=ids) if ids else []
         by_id = {m.id: m for m in msgs if m is not None}
         files = [by_id[i] for i in ref["files"] if i in by_id]
         if not files:
             raise RuntimeError("los mensajes originales ya no existen")
         unit = Unit(ref["kind"], files, [by_id[i] for i in ref["covers"] if i in by_id],
+                    [(by_id[i], side) for i, side in candidates if i in by_id],
                     ref.get("hints", []), ref.get("hint_ids", []))
         return entity, unit
 
@@ -349,16 +365,24 @@ class Organizer:
                 await reporter.set(f"⬇️ {i}/{n}: {m.file.name or 'archivo'}", force=True)
                 downloaded.append(await download(self.user, m, os.path.join(work, str(i)),
                                                  reporter.callback(f"⬇️ {i}/{n}")))
-            covers = []
+            images = Images()
             for j, c in enumerate(unit.covers):
                 try:
-                    covers.append((await download(self.user, c, os.path.join(work, f"c{j}")))[1])
+                    images.strong.append((await download(self.user, c, os.path.join(work, f"c{j}")))[1])
                 except Exception as e:
                     self.log(f"  no pude bajar la caratula {c.id}: {e!r}")
+            for j, (c, side) in enumerate(unit.candidates):
+                if (chat_id, c.id) in self.used_covers:
+                    continue  # ya se verifico como portada de otro disco
+                try:
+                    path = (await download(self.user, c, os.path.join(work, f"k{j}")))[1]
+                    images.candidates.append((c, side, path))
+                except Exception as e:
+                    self.log(f"  no pude bajar la imagen {c.id}: {e!r}")
             if unit.kind == "audio":
-                return await self._publish_audio(entity, source_title, unit, downloaded, covers,
+                return await self._publish_audio(entity, source_title, unit, downloaded, images,
                                                  work, reporter, forced)
-            return [await self._publish_archive(entity, source_title, unit, downloaded, covers,
+            return [await self._publish_archive(entity, source_title, unit, downloaded, images,
                                                 work, reporter, forced)]
         except asyncio.CancelledError:
             raise
@@ -384,6 +408,92 @@ class Organizer:
                                 reason, genres=res.genres_seen, key=key)
         return None, res
 
+    # ---------- portada ----------
+
+    async def _internet_cover(self, info: AlbumInfo, work, tag):
+        """Portada del album exacto (Cover Art Archive, iTunes o Deezer), o None."""
+        queries = [(info.artist, info.album)]
+        if info.artist and info.album:
+            queries.append(("", f"{info.artist} {info.album}"))
+        for artist, album in queries:
+            if not (artist or album):
+                continue
+            res = await self.lookup.lookup(artist, album)  # ya esta en la cache casi siempre
+            for source, url in res.covers:
+                path = await self.lookup.download_cover(url, os.path.join(work, f"net{tag}_{source}"))
+                if path:
+                    return path, source
+        return None
+
+    def _side_habit(self, chat_id) -> str | None:
+        """"antes" o "despues" si ese grupo pone casi siempre la portada del
+        mismo lado del ZIP (segun los casos ya verificados)."""
+        counts = self.store.cover_sides.get(str(chat_id), {})
+        total = sum(counts.values())
+        if total < COVER_HABIT_MIN:
+            return None
+        side, n = max(counts.items(), key=lambda kv: kv[1])
+        return side if n / total >= COVER_HABIT_SHARE else None
+
+    async def _pick_covers(self, chat_id, info: AlbumInfo, strong, candidates, reference, work, tag):
+        """Devuelve ([imagenes a publicar], motivo). `strong`: con vinculo
+        seguro (album de Telegram o respuesta). `candidates`: [(mensaje,
+        lado, ruta)] cercanas en el tiempo, que pueden ser del disco vecino.
+        `reference`: la caratula que trae el disco adentro, o None."""
+        # Un compilado sin artista puede coincidir con otro del mismo titulo: su
+        # portada de internet sirve para comparar, pero no se publica.
+        can_publish_net = bool(info.artist)
+        if config.COVER_PREF == "internet" and can_publish_net:
+            net = await self._internet_cover(info, work, tag)
+            if net:
+                return [net[0]], f"de internet ({net[1]})"
+
+        net = None
+        ref_hash = await asyncio.to_thread(image_hash, reference) if reference else None
+        ref_label = "la que trae el disco adentro"
+        if ref_hash is None and candidates:
+            # Sin caratula adentro: la de internet sirve para comparar.
+            net = await self._internet_cover(info, work, tag)
+            if net:
+                ref_hash = await asyncio.to_thread(image_hash, net[0])
+                ref_label = f"la de internet ({net[1]})"
+
+        chosen, why = list(strong), "del grupo, vinculada al disco" if strong else ""
+        for msg, side, path in candidates:
+            verdict = caption_verdict(msg.message, info)
+            if verdict is False:
+                continue  # su caption nombra a otro disco
+            if verdict is None:
+                verdict = same_image(await asyncio.to_thread(image_hash, path), ref_hash)
+                reason = f"del grupo, igual a {ref_label}" if verdict else ""
+            else:
+                reason = "del grupo, su caption nombra al disco"
+            if verdict:
+                chosen.append(path)
+                why = why or reason
+                self.used_covers.add((chat_id, msg.id))
+                sides = self.store.cover_sides.setdefault(str(chat_id), {})
+                sides[side] = sides.get(side, 0) + 1
+                self.store.save_cover_sides()
+
+        if not chosen and candidates and ref_hash is None:
+            # Nada con que comparar: solo si el grupo tiene una costumbre clara.
+            habit = self._side_habit(chat_id)
+            pick = [(m, p) for m, side, p in candidates if side == habit]
+            if pick:
+                chosen = [pick[0][1]]
+                why = f"del grupo, publicada {habit} del ZIP como hace siempre ese grupo"
+                self.used_covers.add((chat_id, pick[0][0].id))
+        if chosen:
+            return chosen, why
+        if reference:
+            return [reference], "la que trae el disco adentro"
+        if can_publish_net:
+            net = net or await self._internet_cover(info, work, tag)
+            if net:
+                return [net[0]], f"de internet ({net[1]})"
+        return [], "sin portada (ninguna imagen se pudo verificar)"
+
     @staticmethod
     def _cover_caption(name, res: Resolution, details: str) -> str:
         lines = [f"💿 {name}"]
@@ -392,7 +502,7 @@ class Organizer:
         lines.append(details)
         return "\n".join(lines)
 
-    async def _publish_audio(self, entity, source_title, unit, downloaded, covers, work, reporter, forced):
+    async def _publish_audio(self, entity, source_title, unit, downloaded, images, work, reporter, forced):
         await reporter.set("🏷 leyendo etiquetas…", force=True)
         tags = await asyncio.to_thread(lambda: [read_tags(p) for _, p in downloaded])
         groups = split_by_album(list(zip(downloaded, tags)))
@@ -401,7 +511,8 @@ class Organizer:
         for gi, group in enumerate(groups):
             msgs = [m for (m, _), _ in group]
             paths = [p for (_, p), _ in group]
-            sub = unit if len(groups) == 1 else Unit("audio", msgs, unit.covers if gi == 0 else [])
+            sub = unit if len(groups) == 1 else Unit("audio", msgs, unit.covers if gi == 0 else [],
+                                                     unit.candidates)
             key = sub.key()
             info = info_from_tags([t for _, t in group])
             if gi == 0:
@@ -422,10 +533,11 @@ class Organizer:
                 outcomes.append(Outcome("pendiente", name, res.genres_seen and ", ".join(res.genres_seen[:5]) or ""))
                 continue
 
-            group_covers = covers if gi == 0 else []
-            if not group_covers:
-                emb = await asyncio.to_thread(extract_cover, paths[0], os.path.join(work, f"emb{gi}"))
-                group_covers = [emb] if emb else []
+            embedded = await asyncio.to_thread(extract_cover, paths[0], os.path.join(work, f"emb{gi}"))
+            await reporter.set("🖼 eligiendo la portada…", force=True)
+            group_covers, cover_note = await self._pick_covers(
+                utils.get_peer_id(entity), info, images.strong if gi == 0 else [], images.candidates,
+                embedded, work, gi)
             exts = sorted({p.suffix.lstrip(".").upper() for p in paths})
             details = f"🎧 {len(paths)} pista(s) · {'/'.join(exts)} · {human(sum(p.stat().st_size for p in paths))}"
             caption = self._cover_caption(name, res, details)
@@ -442,26 +554,28 @@ class Organizer:
                                     topic.id, reporter)
                 z.unlink(missing_ok=True)
             self.store.mark_sent(key, name, topic.title, source_title)
-            outcomes.append(Outcome("enviado", name, f"{topic.title} ({res.via})"))
+            outcomes.append(Outcome("enviado", name, f"{topic.title} ({res.via}; portada: {cover_note})"))
         return outcomes
 
-    async def _publish_archive(self, entity, source_title, unit, downloaded, covers, work, reporter, forced):
+    async def _publish_archive(self, entity, source_title, unit, downloaded, images, work, reporter, forced):
         key = unit.key()
         info = unit.guess()
         first = downloaded[0][1]
+        zip_cover = None
         if first.suffix.lower() == ".zip":
             await reporter.set("🔎 mirando adentro del ZIP…", force=True)
             tags, zip_cover = await asyncio.to_thread(peek_zip, first, work, config.AUDIO_EXTS)
             if tags:
                 info = info.merge(info_from_tags([tags]))
-            if not covers and zip_cover:
-                covers = [zip_cover]
         name = clean_name(info.name) if info.name else first.stem
         topic, res = await self._choose(entity, source_title, unit.to_ref(), name, info,
                                         [p.name for _, p in downloaded], key, forced)
         if topic is None:
             return Outcome("pendiente", name, ", ".join(res.genres_seen[:5]))
 
+        await reporter.set("🖼 eligiendo la portada…", force=True)
+        covers, cover_note = await self._pick_covers(utils.get_peer_id(entity), info, images.strong,
+                                                     images.candidates, zip_cover, work, "z")
         details = f"📦 {len(downloaded)} archivo(s) · {human(sum(p.stat().st_size for _, p in downloaded))}"
         caption = self._cover_caption(name, res, details)
         await reporter.set(f"📤 publicando en «{topic.title}»…", force=True)
@@ -470,7 +584,7 @@ class Organizer:
             text = (msg.message or "").strip() if sent_cover else caption + "\n\n" + (msg.message or "")
             await send_document(self.user, self.dest, path, text.strip() or name, topic.id, reporter)
         self.store.mark_sent(key, name, topic.title, source_title)
-        return Outcome("enviado", name, f"{topic.title} ({res.via})")
+        return Outcome("enviado", name, f"{topic.title} ({res.via}; portada: {cover_note})")
 
     # ---------- una fuente completa ----------
 

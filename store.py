@@ -75,6 +75,9 @@ class Store:
         # generos en temas equivocados: ya no se usa.)
         self.learned.setdefault("mapeo_generos", {})
         self.lookup_cache = load_json(config.LOOKUP_CACHE_PATH, {})
+        # {chat_id: {"antes": n, "despues": n}}: de que lado del ZIP pone cada
+        # grupo la portada, contando las que se verificaron.
+        self.cover_sides = load_json(config.COVER_SIDES_PATH, {})
 
     def save_pending(self):
         save_json(config.PENDING_PATH, self.pending)
@@ -87,6 +90,9 @@ class Store:
 
     def save_lookup_cache(self):
         save_json(config.LOOKUP_CACHE_PATH, self.lookup_cache)
+
+    def save_cover_sides(self):
+        save_json(config.COVER_SIDES_PATH, self.cover_sides)
 
     def add_pending(self, entry: dict) -> int:
         pid = self.pending["next_id"]

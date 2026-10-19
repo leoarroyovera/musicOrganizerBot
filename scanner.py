@@ -70,7 +70,11 @@ def thread_of(msg, forum: bool) -> int:
 class Unit:
     kind: str  # "audio" | "archivo"
     files: list = field(default_factory=list)
+    # Caratulas con vinculo seguro: mismo album de Telegram o respuesta.
     covers: list = field(default_factory=list)
+    # Imagenes cercanas en el tiempo: [(mensaje, "antes" | "despues")]. Pueden
+    # ser de este disco o del vecino; se verifican al publicar.
+    candidates: list = field(default_factory=list)
     hints: list = field(default_factory=list)  # textos sueltos que lo presentan
     hint_ids: list = field(default_factory=list)
     base: str = ""
@@ -81,7 +85,8 @@ class Unit:
 
     @property
     def min_id(self):
-        return min([m.id for m in self.files + self.covers] + self.hint_ids)
+        return min([m.id for m in self.files + self.covers] + [m.id for m, _ in self.candidates]
+                   + self.hint_ids)
 
     @property
     def last_date(self):
@@ -121,10 +126,44 @@ class Unit:
 
     def to_ref(self) -> dict:
         return {"kind": self.kind, "files": [m.id for m in self.files],
-                "covers": [m.id for m in self.covers], "hints": self.hints, "hint_ids": self.hint_ids}
+                "covers": [m.id for m in self.covers], "hints": self.hints, "hint_ids": self.hint_ids,
+                "candidates": [[m.id, side] for m, side in self.candidates]}
 
 
-def group_messages(msgs: list, gap: timedelta) -> list[Unit]:
+def reply_target(msg, forum: bool) -> int | None:
+    """Id del mensaje al que responde `msg`. En un foro, un mensaje comun de
+    un tema lleva el id del tema en reply_to_msg_id: eso no es una respuesta."""
+    r = msg.reply_to
+    if r is None or not getattr(r, "reply_to_msg_id", None):
+        return None
+    if forum and getattr(r, "forum_topic", False) and not r.reply_to_top_id:
+        return None
+    return r.reply_to_msg_id
+
+
+def _link_replies(units: list[Unit], images: list, forum: bool) -> None:
+    """Una imagen que responde a un archivo del disco (o un archivo que
+    responde a la imagen) es su caratula, este donde este."""
+    unit_of = {f.id: u for u in units for f in u.files}
+    image_by_id = {m.id: m for m in images}
+    links = []
+    for img in images:
+        target = reply_target(img, forum)
+        if target in unit_of:
+            links.append((unit_of[target], img))
+    for u in units:
+        for f in u.files:
+            target = reply_target(f, forum)
+            if target in image_by_id:
+                links.append((u, image_by_id[target]))
+    for u, img in links:
+        for other in units:
+            other.candidates = [(m, side) for m, side in other.candidates if m.id != img.id]
+        if all(c.id != img.id for c in u.covers):
+            u.covers.append(img)
+
+
+def group_messages(msgs: list, gap: timedelta, forum: bool = False) -> list[Unit]:
     """`msgs`: mensajes de un mismo hilo, en orden cronologico."""
     units: list[Unit] = []
     cur: Unit | None = None
@@ -132,17 +171,14 @@ def group_messages(msgs: list, gap: timedelta) -> list[Unit]:
     hint = None  # mensaje de texto "Artista - Album (Año)"
 
     def place_loose(next_unit: Unit | None, next_date=None):
-        # Cada imagen va con el album mas cercano en el tiempo (antes o despues),
-        # si alguno esta a menos de `gap`.
+        # Una imagen entre dos discos puede ser de cualquiera de los dos (unos
+        # suben la portada antes del ZIP y otros despues): queda como candidata
+        # de ambos, si estan a menos de `gap`, y se decide al publicar.
         for img in loose:
-            d_prev = img.date - cur.last_date if cur else None
-            d_next = next_date - img.date if next_date else None
-            prev_ok = d_prev is not None and d_prev <= gap
-            next_ok = d_next is not None and d_next <= gap
-            if prev_ok and (not next_ok or d_prev < d_next):
-                cur.covers.append(img)
-            elif next_ok:
-                next_unit.covers.append(img)
+            if cur and img.date - cur.last_date <= gap:
+                cur.candidates.append((img, "despues"))
+            if next_unit and next_date and next_date - img.date <= gap:
+                next_unit.candidates.append((img, "antes"))
         loose.clear()
 
     for m in msgs:
@@ -192,6 +228,7 @@ def group_messages(msgs: list, gap: timedelta) -> list[Unit]:
     place_loose(None)
     if cur:
         units.append(cur)
+    _link_replies(units, [m for m in msgs if kind_of(m) == "imagen"], forum)
     return units
 
 
@@ -208,13 +245,13 @@ async def scan(client, entity, min_id: int, forum: bool):
     gap = timedelta(minutes=config.GAP_MINUTES)
     units = []
     for msgs in threads.values():
-        units += group_messages(msgs, gap)
+        units += group_messages(msgs, gap, forum)
     units.sort(key=lambda u: u.first_id)
     return units, last_id
 
 
 def summarize(units: list[Unit]) -> str:
     kinds = Counter(u.kind for u in units)
-    covers = sum(1 for u in units if u.covers)
+    covers = sum(1 for u in units if u.covers or u.candidates)
     return (f"{kinds.get('audio', 0)} álbum(es) de audios sueltos, "
-            f"{kinds.get('archivo', 0)} comprimido(s), {covers} con carátula")
+            f"{kinds.get('archivo', 0)} comprimido(s), {covers} con imagen cerca")

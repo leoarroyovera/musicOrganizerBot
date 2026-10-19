@@ -4,7 +4,7 @@ Bot de Telegram que complementa el supergrupo **WAV/FLAC**: le pasás el link de
 
 - **Audios sueltos** (FLAC, WAV, AIFF, APE, WV, DSF/DFF): los audios consecutivos de un mismo álbum se juntan en un **ZIP sin compresión** (como el modo ZIP de rateroBot), con nombre `Artista - Álbum (Año)`.
 - **Comprimidos** (`.zip`, `.rar`, `.7z`, incluidos los multiparte `.part1.rar`, `.7z.001`, `.z01`…): se reenvían tal cual, como archivo nuevo.
-- **Carátulas**: las imágenes junto a un álbum se publican antes del ZIP, con un caption `💿 Artista - Álbum (Año) / 🏷 género`. Si el álbum no trae imagen se usa la carátula embebida en el primer audio (o el `cover.jpg` que haya dentro del ZIP). Las imágenes que no están cerca de ningún álbum se ignoran.
+- **Carátulas**: se publican antes del ZIP, con un caption `💿 Artista - Álbum (Año) / 🏷 género`. Una imagen del grupo solo se usa si se verifica que es de ese disco; si no, la que trae el disco adentro o la de internet (ver *Cómo se elige la portada*).
 
 Se basa en [cloneToTelegram](../cloneToTelegram) (recorrido del grupo, checkpoint, bot de control) y [rateroBot](../rateroBot) (descarga y subida en paralelo, ZIP, nombre del álbum).
 
@@ -48,8 +48,22 @@ En cada tema (o en todo el chat, si el grupo no tiene Temas) los mensajes se rec
 
 - Audios seguidos forman un álbum. Se corta cuando pasan más de `PAUSA_MINUTOS` (30) entre uno y otro, cuando aparece una imagen o un texto `Artista - Álbum (Año)` que presenta al siguiente, o cuando aparece otro tipo de archivo (video, mp3…). Después de bajar, si las etiquetas muestran dos álbumes distintos seguidos, salen dos ZIP.
 - Las partes de un mismo comprimido (`.part1.rar`, `.part2.rar`…) van juntas.
-- Cada imagen se asigna al álbum más cercano en el tiempo, antes o después, si está a menos de 30 minutos.
+- Las imágenes a menos de 30 minutos quedan como *candidatas* del disco de antes y del de después; cuál es de cuál se decide al publicar (ver abajo). Una imagen que responde a un archivo del disco (o a la que responde un archivo), o que va en el mismo álbum de Telegram, es suya aunque esté lejos.
 - Los álbumes subidos hace menos de `ESPERA_MINUTOS` (15) se dejan para la próxima corrida, por si todavía los están subiendo.
+
+### Cómo se elige la portada
+
+Las imágenes de un grupo se cruzan entre discos porque unos uploaders suben la portada antes del ZIP y otros después. Por eso la posición no alcanza, y la portada se elige así:
+
+1. **Vínculo seguro**: si la imagen va en el mismo álbum de Telegram que los archivos, o responde a uno de ellos (o un archivo responde a la imagen), es de ese disco.
+2. **Caption**: si la imagen dice "Artista - Álbum" y coincide con el disco, es suya. Si nombra a otro disco, se descarta aunque esté pegada.
+3. **Comparación visual**: cada imagen candidata se compara, con una huella que aguanta cambios de tamaño y la recompresión de Telegram, con la carátula que trae el disco adentro (embebida en el FLAC o `cover.jpg` del ZIP). Si el disco no trae carátula, se compara con la de internet. Solo se usa si es la misma imagen; las contratapas y las portadas del disco vecino quedan afuera.
+4. **Costumbre del grupo**: con los casos verificados, el bot aprende si ese grupo pone la portada antes o después del ZIP (`data/portadas.json`). Cuando no hay con qué comparar, usa la imagen de ese lado, solo si al menos 5 casos verificados lo confirman en un 80 %.
+5. **La que trae el disco adentro**.
+6. **De internet**: Cover Art Archive (MusicBrainz), iTunes o Deezer, de 600 a 1200 px, solo cuando la búsqueda encontró el álbum exacto. En un compilado sin artista no se publica, porque puede ser de otro compilado con el mismo título.
+7. **Sin portada**: si nada de lo anterior se pudo verificar. Una portada equivocada es peor que ninguna.
+
+Con `PORTADA_PREFERIDA=internet` se usa primero la de internet cuando existe (mejor calidad), y el resto queda de respaldo. El resultado de cada disco dice de dónde salió su portada.
 
 ### Cómo se decide el tema
 
@@ -110,6 +124,7 @@ Las tareas corren de a una; si mandás otro link mientras trabaja, queda en cola
 | `MAX_UPLOAD_MB` | automático | 4000 con Premium, 2000 sin. Los archivos más grandes quedan como pendientes con error. |
 | `ZIP_MAX_MB` | límite de subida | Si el ZIP lo supera se parte en `_parte1.zip`, `_parte2.zip`… |
 | `MARGEN_DISCO_MB` | 500 | Espacio libre mínimo a dejar en disco. Cada álbum necesita en `tmp/` el doble de su tamaño. |
+| `PORTADA_PREFERIDA` | `grupo` | `grupo`: la imagen del grupo si se verifica, si no la de adentro o la de internet. `internet`: primero la de internet. |
 | `CONTACTO_MUSICBRAINZ` | vacío | Email o URL para el User-Agent; MusicBrainz lo pide y limita menos con contacto. |
 | `ANTHROPIC_API_KEY` | vacío | Activa el paso de Claude. Se cobra por uso; solo se llama para los álbumes sin género en las búsquedas gratuitas. |
 | `BUSQUEDA_CLAUDE` | automático | `0` apaga Claude aunque haya clave. |
@@ -124,7 +139,8 @@ fuentes/<id>.json      checkpoint y números por grupo origen
 pendientes.json        álbumes esperando tema o reintento
 enviados.json          álbumes ya publicados (evita duplicados)
 aprendido.json         artista -> tema y género -> tema (/mapear)
-cache_busquedas.json   resultados de MusicBrainz/Deezer/iTunes
+cache_busquedas.json   resultados de MusicBrainz/Deezer/iTunes (géneros y portadas)
+portadas.json          de qué lado del ZIP pone la portada cada grupo
 ```
 
 Logs en `logs/bot.log`.
@@ -157,6 +173,7 @@ music_meta.py     etiquetas, carátula embebida, "Artista - Álbum (Año)"
 topic_match.py    emparejar géneros con temas (usa generos.json)
 genre_lookup.py   MusicBrainz, Deezer e iTunes
 claude_pick.py    Claude con búsqueda web (opcional)
+covers.py         verificar portadas (caption y huella visual)
 media.py          descarga, ZIP y subida (de rateroBot)
 fast_upload.py / fast_download.py   conexiones en paralelo (de rateroBot)
 album_name.py     nombre del ZIP (de rateroBot)

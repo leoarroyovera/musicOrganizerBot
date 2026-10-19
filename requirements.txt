@@ -3,3 +3,4 @@ python-dotenv>=1.0
 mutagen>=1.45
 httpx>=0.27
 anthropic>=1.15
+pillow>=10.0
