@@ -500,10 +500,10 @@ class OrganizerBot:
         if not m:
             await event.respond("Uso: /diagnostico <link> [desde_id] [cantidad]\n"
                                 "Lista los mensajes como los ve el bot y por qué corta cada disco "
-                                "(default: los primeros 80). Con un link a un mensaje empieza ahí.")
+                                "(default: los primeros 300). Con un link a un mensaje empieza ahí.")
             return
         start = int(m[2]) if m[2] else None
-        limit = min(int(m[3]) if m[3] else 80, 500)
+        limit = min(int(m[3]) if m[3] else 300, 1000)
         await self.enqueue(self.diagnose_job(m[1], start, limit), event)
 
     async def on_research(self, event):

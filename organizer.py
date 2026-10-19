@@ -6,6 +6,7 @@ import random
 import re
 import shutil
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -42,8 +43,17 @@ from media import (
     send_covers,
     send_document,
 )
-from music_meta import AlbumInfo, extract_cover, info_from_tags, peek_zip, read_tags, split_by_album
-from scanner import Unit, describe, reply_target, scan, scan_messages, summarize, thread_of
+from music_meta import (
+    AlbumInfo,
+    extract_cover,
+    info_from_tags,
+    parse_name,
+    parse_title,
+    peek_zip,
+    read_tags,
+    split_by_album,
+)
+from scanner import Unit, describe, kind_of, reply_target, scan, scan_messages, summarize, thread_of
 from topic_match import ARTIST_SUFFIX, Matcher, Topic, norm
 
 INVITE_RE = re.compile(r"(?:t|telegram)\.me/(?:\+|joinchat/)([\w-]+)", re.I)
@@ -652,9 +662,27 @@ class Organizer:
         async for msg in self.user.iter_messages(entity, reverse=True, min_id=(start_id or 1) - 1, limit=limit):
             if msg.action is None:
                 msgs.append(msg)
+        topic_titles = dict(await list_topics(self.user, entity)) if forum else {}
         lines = [f"Diagnóstico de {title} — {len(msgs)} mensajes desde el id {msgs[0].id if msgs else '-'}",
-                 f"(foro: {'sí' if forum else 'no'}; pausa máxima entre temas: {config.GAP_MINUTES} min)", "",
-                 "id | +min | tema | remitente | tipo | álbum TG | archivo / caption"]
+                 f"(foro: {'sí' if forum else 'no'}; pausa máxima entre temas: {config.GAP_MINUTES} min)"]
+
+        by_thread = {}
+        for m in msgs:
+            by_thread.setdefault(thread_of(m, forum), []).append(m)
+        if forum:
+            lines += ["", f"Resumen por tema ({len(by_thread)} con mensajes en este tramo):",
+                      "tema | título | audios | imágenes | otros | pausa máx. entre audios | ¿título = disco?"]
+            for th, tmsgs in sorted(by_thread.items()):
+                kinds = Counter(kind_of(m) for m in tmsgs)
+                audios = [m for m in tmsgs if kind_of(m) in ("audio", "archivo")]
+                gaps = [(b.date - a.date).total_seconds() / 60 for a, b in zip(audios, audios[1:])]
+                max_gap = f"{max(gaps):.0f} min" if gaps else "-"
+                t_title = topic_titles.get(th, "General" if th == 1 else "?")
+                looks = "sí" if parse_name(t_title) or parse_title(t_title) else "no"
+                lines.append(f"{th} | {t_title[:40]} | {kinds['audio'] + kinds['archivo']} | {kinds['imagen']} | "
+                             f"{len(tmsgs) - kinds['audio'] - kinds['archivo'] - kinds['imagen']} | {max_gap} | {looks}")
+
+        lines += ["", "id | +min | tema | remitente | tipo | álbum TG | archivo / caption"]
         last_date = {}
         for m in msgs:
             th = thread_of(m, forum)

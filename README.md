@@ -108,7 +108,7 @@ También aparecen en el botón **Menú** de Telegram, y `/menu` los muestra como
 | `/aprendido` | Artistas (asignados a mano o elegidos en pendientes) y géneros asignados a mano. |
 | `/mapear artista\|genero <nombre> = <tema>` | Asigna a mano. Un artista mapeado gana sobre el género (`/mapear artista Soda Stereo = Rock en Español`); un género mapeado sirve para los que no están en `generos.json`. |
 | `/olvidar artista\|genero <nombre>` | Borra algo aprendido. |
-| `/diagnostico <link> [desde_id] [n]` | Lista los primeros `n` mensajes (default 80) como los ve el bot (remitente, tipo, minutos desde el anterior, número de tema, respuestas) y los discos que arma, con el motivo de cada corte. Si es largo llega como .txt. Sirve para entender por qué un disco salió partido. |
+| `/diagnostico <link> [desde_id] [n]` | Lista los primeros `n` mensajes (default 300) como los ve el bot (remitente, tipo, minutos desde el anterior del mismo tema, respuestas), un resumen por tema del foro (título, audios, imágenes, pausa más larga) y los discos que arma, con el motivo de cada corte. Si es largo llega como .txt. Sirve para entender por qué un disco salió partido. |
 | `/logs [n]` | Últimas `n` líneas (default 30) del log. |
 | `/ayuda` | Cómo funciona y la lista de comandos. |
 
