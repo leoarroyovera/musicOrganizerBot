@@ -18,6 +18,10 @@ import config
 from music_meta import AlbumInfo, info_from_texts, parse_name
 
 IMAGE_MIMES = ("image/jpeg", "image/png", "image/webp")
+# Muestra: hasta estos temas sueltos, del mismo usuario, seguidos sin nada en
+# medio por un comprimido a menos de este tiempo.
+MAX_SAMPLE_FILES = 2
+SAMPLE_MAX_GAP = timedelta(minutes=10)
 IMAGE_EXTS = ("jpg", "jpeg", "png", "webp")
 # album.zip, album.rar, album.part2.rar, album.7z.001, album.r00, album.z01
 ARCHIVE_RE = re.compile(r"\.(?:zip|rar|7z)(?:\.\d{3})?$|\.part\d+\.rar$|\.[rz]\d{2}$", re.I)
@@ -102,6 +106,9 @@ class Unit:
     hint_ids: list = field(default_factory=list)
     base: str = ""
     cut: str = ""  # por que termino este disco (para /diagnostico)
+    # Temas sueltos publicados como muestra justo antes del comprimido: no se
+    # publican, pero sus etiquetas y su caratula sirven para el comprimido.
+    samples: list = field(default_factory=list)
 
     @property
     def first_id(self):
@@ -109,8 +116,8 @@ class Unit:
 
     @property
     def min_id(self):
-        return min([m.id for m in self.files + self.covers] + [m.id for m, _ in self.candidates]
-                   + self.hint_ids)
+        return min([m.id for m in self.files + self.covers + self.samples]
+                   + [m.id for m, _ in self.candidates] + self.hint_ids)
 
     @property
     def last_date(self):
@@ -151,7 +158,8 @@ class Unit:
     def to_ref(self) -> dict:
         return {"kind": self.kind, "files": [m.id for m in self.files],
                 "covers": [m.id for m in self.covers], "hints": self.hints, "hint_ids": self.hint_ids,
-                "candidates": [[m.id, side] for m, side in self.candidates]}
+                "candidates": [[m.id, side] for m, side in self.candidates],
+                "samples": [m.id for m in self.samples]}
 
 
 def reply_target(msg, forum: bool) -> int | None:
@@ -185,6 +193,30 @@ def _link_replies(units: list[Unit], images: list, forum: bool) -> None:
             other.candidates = [(m, side) for m, side in other.candidates if m.id != img.id]
         if all(c.id != img.id for c in u.covers):
             u.covers.append(img)
+
+
+def _absorb_samples(units: list[Unit], msgs: list) -> list[Unit]:
+    """Patron "portada, un tema suelto, el disco en .7z": ese tema es una
+    muestra del comprimido que viene justo despues, no un disco aparte. Pasa
+    a ser parte del comprimido junto con su portada y sus textos."""
+    position = {m.id: i for i, m in enumerate(msgs)}
+    out = []
+    for u in units:
+        prev = out[-1] if out else None
+        if (prev is not None and prev.kind == "audio" and u.kind == "archivo"
+                and len(prev.files) <= MAX_SAMPLE_FILES
+                and position[u.files[0].id] == position[prev.files[-1].id] + 1
+                and u.files[0].date - prev.files[-1].date <= SAMPLE_MAX_GAP
+                and len({getattr(m, "sender_id", None) for m in prev.files + u.files[:1]}) == 1):
+            u.samples = prev.files + u.samples
+            u.covers = prev.covers + u.covers
+            u.candidates = prev.candidates + [c for c in u.candidates
+                                              if all(c[0].id != p[0].id for p in prev.candidates)]
+            u.hints, u.hint_ids = prev.hints + u.hints, prev.hint_ids + u.hint_ids
+            out[-1] = u
+            continue
+        out.append(u)
+    return out
 
 
 def group_messages(msgs: list, gap: timedelta, forum: bool = False) -> list[Unit]:
@@ -265,6 +297,7 @@ def group_messages(msgs: list, gap: timedelta, forum: bool = False) -> list[Unit
     if cur:
         cur.cut = "ultimo mensaje leido"
         units.append(cur)
+    units = _absorb_samples(units, msgs)
     _link_replies(units, [m for m in msgs if kind_of(m) == "imagen"], forum)
     return units
 

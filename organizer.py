@@ -9,6 +9,7 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from telethon import utils
 from telethon.tl.functions.messages import (
@@ -48,7 +49,6 @@ from music_meta import (
     extract_cover,
     info_from_tags,
     parse_name,
-    parse_title,
     peek_zip,
     read_tags,
     split_by_album,
@@ -91,6 +91,7 @@ class Resolution:
 class Images:
     strong: list = field(default_factory=list)      # [ruta] con vinculo seguro
     candidates: list = field(default_factory=list)  # [(mensaje, lado, ruta)]
+    sample: Path | None = None  # tema de muestra de un comprimido, ya bajado
 
 
 @dataclass
@@ -331,7 +332,7 @@ class Organizer:
         entity = await _entity_from_peer(self.user, peer_cls(real_id))
         ref = entry["ref"]
         candidates = ref.get("candidates", [])
-        ids = ref["files"] + ref["covers"] + [i for i, _ in candidates]
+        ids = ref["files"] + ref["covers"] + [i for i, _ in candidates] + ref.get("samples", [])
         msgs = await self.user.get_messages(entity, ids=ids) if ids else []
         by_id = {m.id: m for m in msgs if m is not None}
         files = [by_id[i] for i in ref["files"] if i in by_id]
@@ -340,6 +341,7 @@ class Organizer:
         unit = Unit(ref["kind"], files, [by_id[i] for i in ref["covers"] if i in by_id],
                     [(by_id[i], side) for i, side in candidates if i in by_id],
                     ref.get("hints", []), ref.get("hint_ids", []))
+        unit.samples = [by_id[i] for i in ref.get("samples", []) if i in by_id]
         return entity, unit
 
     async def retry_pending(self, pid: int, topic: Topic | None, reporter) -> list[Outcome]:
@@ -369,7 +371,7 @@ class Organizer:
 
         work = os.path.join(config.TMP_DIR, uuid.uuid4().hex)
         try:
-            ensure_disk_space(2 * unit.size)
+            ensure_disk_space(2 * unit.size + sum(m.file.size or 0 for m in unit.samples[:1]))
             n = len(unit.files)
             downloaded = []
             for i, m in enumerate(unit.files, 1):
@@ -382,6 +384,13 @@ class Organizer:
                     images.strong.append((await download(self.user, c, os.path.join(work, f"c{j}")))[1])
                 except Exception as e:
                     self.log(f"  no pude bajar la caratula {c.id}: {e!r}")
+            if unit.samples:
+                # Etiquetas y caratula para un .7z/.rar, que no se puede mirar por dentro.
+                try:
+                    images.sample = (await download(self.user, unit.samples[0],
+                                                    os.path.join(work, "muestra")))[1]
+                except Exception as e:
+                    self.log(f"  no pude bajar la muestra {unit.samples[0].id}: {e!r}")
             for j, (c, side) in enumerate(unit.candidates):
                 if (chat_id, c.id) in self.used_covers:
                     continue  # ya se verifico como portada de otro disco
@@ -581,6 +590,12 @@ class Organizer:
             tags, zip_cover = await asyncio.to_thread(peek_zip, first, work, config.AUDIO_EXTS)
             if tags:
                 info = info.merge(info_from_tags([tags]))
+        if images.sample is not None:
+            tags = await asyncio.to_thread(read_tags, images.sample)
+            if tags:
+                info = info.merge(info_from_tags([tags]))
+            if zip_cover is None:
+                zip_cover = await asyncio.to_thread(extract_cover, images.sample, os.path.join(work, "muestra_cover"))
         name = clean_name(info.name) if info.name else first.stem
         topic, res = await self._choose(entity, source_title, unit.to_ref(), name, info,
                                         [p.name for _, p in downloaded], key, forced)
@@ -678,7 +693,7 @@ class Organizer:
                 gaps = [(b.date - a.date).total_seconds() / 60 for a, b in zip(audios, audios[1:])]
                 max_gap = f"{max(gaps):.0f} min" if gaps else "-"
                 t_title = topic_titles.get(th, "General" if th == 1 else "?")
-                looks = "sí" if parse_name(t_title) or parse_title(t_title) else "no"
+                looks = "sí" if parse_name(t_title) else "no"
                 lines.append(f"{th} | {t_title[:40]} | {kinds['audio'] + kinds['archivo']} | {kinds['imagen']} | "
                              f"{len(tmsgs) - kinds['audio'] - kinds['archivo'] - kinds['imagen']} | {max_gap} | {looks}")
 
@@ -704,7 +719,8 @@ class Organizer:
         for u in units:
             ids = [f.id for f in u.files]
             span = f"{ids[0]}–{ids[-1]}" if len(ids) > 1 else str(ids[0])
-            lines.append(f"• {u.kind} con {len(u.files)} archivo(s) [{span}] {u.label()}")
+            sample = f" + muestra {[m.id for m in u.samples]} (no se publica)" if u.samples else ""
+            lines.append(f"• {u.kind} con {len(u.files)} archivo(s) [{span}]{sample} {u.label()}")
             lines.append(f"   portadas seguras: {[c.id for c in u.covers]} · candidatas: "
                          f"{[(c.id, side) for c, side in u.candidates]} · corte: {u.cut}")
         return "\n".join(lines)

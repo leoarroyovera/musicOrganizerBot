@@ -48,6 +48,7 @@ En cada tema (o en todo el chat, si el grupo no tiene Temas) los mensajes se rec
 
 - Audios seguidos forman un álbum. Se corta cuando pasan más de `PAUSA_MINUTOS` (30) entre uno y otro, cuando aparece una imagen o un texto `Artista - Álbum (Año)` que presenta al siguiente, o cuando aparece otro tipo de archivo (video, mp3…). Después de bajar, si las etiquetas muestran dos álbumes distintos seguidos, salen dos ZIP.
 - Las partes de un mismo comprimido (`.part1.rar`, `.part2.rar`…) van juntas.
+- **Muestras**: muchos grupos publican cada disco como portada → un tema suelto para escuchar → el disco completo en .7z/.rar. Uno o dos temas sueltos del mismo usuario, seguidos sin nada en medio (y en menos de 10 minutos) por un comprimido, son una muestra de ese comprimido: no se publican como ZIP aparte, y sus etiquetas y su carátula se usan para el nombre, el género y la portada del comprimido (un .7z o .rar no se puede mirar por dentro).
 - Las imágenes a menos de 30 minutos quedan como *candidatas* del disco de antes y del de después; cuál es de cuál se decide al publicar (ver abajo). Una imagen que responde a un archivo del disco (o a la que responde un archivo), o que va en el mismo álbum de Telegram, es suya aunque esté lejos.
 - Los álbumes subidos hace menos de `ESPERA_MINUTOS` (15) se dejan para la próxima corrida, por si todavía los están subiendo.
 

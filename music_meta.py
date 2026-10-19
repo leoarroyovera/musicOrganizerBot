@@ -190,6 +190,9 @@ def peek_zip(zip_path, work_dir, audio_exts) -> tuple[dict, Path | None]:
 # ---------- captions y nombres ----------
 
 
+LEADING_YEAR_RE = re.compile(r"^\(?(?P<year>(?:19|20)\d{2})\)?\s*[.\-–—:]\s*")
+
+
 def _clean_line(line: str) -> str:
     line = re.sub(r"\[[^\]]*\]|\{[^}]*\}", " ", line)  # [FLAC 24-96] etc.
     line = re.sub(r"[*_`🎵💿📀🎶]|#\S+", "", line)
@@ -203,12 +206,16 @@ def parse_name(text: str) -> AlbumInfo | None:
     """"Artista - Album (Año)" en alguna linea del texto."""
     for line in (text or "").splitlines():
         line = _clean_line(line)
+        # "2025. Bad Bunny - Debí Tirar Más Fotos": el año adelante no es del artista.
+        lead = LEADING_YEAR_RE.match(line)
+        if lead:
+            line = line[lead.end():]
         m = PATTERN.search(line)
         # "01 - Tema.flac" no es "Artista - Album".
         if m and len(m["album"].strip()) > 1 and not m["artist"].strip().isdigit():
             album = re.sub(r"\s*\((?:19|20)\d{2}\)\s*$", "", m["album"]).strip()
             year = m["year"] or (YEAR_RE.search(m["album"]).group(0) if YEAR_RE.search(m["album"]) else None)
-            return AlbumInfo(m["artist"].strip(), album, year)
+            return AlbumInfo(m["artist"].strip(), album, year or (lead and lead["year"]))
     return None
 
 
