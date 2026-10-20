@@ -1,13 +1,14 @@
 import asyncio
 import os
 import re
+import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Awaitable, Callable
 from urllib.parse import quote_plus
 
 from telethon import Button, TelegramClient, events, utils
-from telethon.errors import MessageNotModifiedError
+from telethon.errors import FloodWaitError, MessageNotModifiedError
 from telethon.tl.functions.bots import SetBotCommandsRequest
 from telethon.tl.types import BotCommand, BotCommandScopeDefault
 
@@ -75,6 +76,35 @@ def _chunks(text: str, size=MAX_MESSAGE):
         yield current
 
 
+class BotClient(TelegramClient):
+    """Despues de un FloodWait no vuelve a llamar a Telegram hasta que venza:
+    seguir insistiendo durante la espera solo la estira."""
+
+    flood_until = 0.0
+
+    async def __call__(self, request, ordered=False, flood_sleep_threshold=None):
+        left = self.flood_until - time.monotonic()
+        if left > 0:
+            raise FloodWaitError(request, int(left) + 1)
+        try:
+            return await super().__call__(request, ordered, flood_sleep_threshold)
+        except FloodWaitError as e:
+            if time.monotonic() >= self.flood_until:
+                _log(f"FloodWait del bot: {e.seconds}s (hasta {datetime.now() + timedelta(seconds=e.seconds):%H:%M})")
+            self.flood_until = time.monotonic() + e.seconds
+            raise
+
+
+def _quiet_flood(handler):
+    async def wrapped(event):
+        try:
+            await handler(event)
+        except FloodWaitError:
+            pass  # ya quedo en el log al empezar la espera
+
+    return wrapped
+
+
 @dataclass
 class Job:
     label: str
@@ -120,7 +150,10 @@ class OrganizerBot:
             if job not in self.waiting:
                 continue  # cancelada mientras esperaba
             self.waiting.remove(job)
-            status = await self.say(f"▶️ {job.label}")
+            try:
+                status = await self.say(f"▶️ {job.label}")
+            except FloodWaitError:
+                status = None  # la tarea corre igual, sin mensaje de estado
             reporter = Reporter(status, f"▶️ {job.label}",
                                 buttons=[Button.inline("⛔ Cancelar", b"m:cancel")])
             task = asyncio.create_task(job.run(reporter))
@@ -129,29 +162,41 @@ class OrganizerBot:
             await asyncio.wait([task])
             self.current = None
             try:
-                summary = task.result()
-                _log(f"OK {job.label}")
-                try:
-                    await status.edit(f"✔️ {job.label}", buttons=None)
-                except MessageNotModifiedError:
-                    pass
-                for chunk in _chunks(summary or "Listo."):
-                    await self.say(chunk)
-            except asyncio.CancelledError:
-                _log(f"CANCELADO {job.label}")
-                await status.edit(f"⛔ Cancelado: {job.label}\nLo ya enviado queda; la próxima vez sigo desde ahí.",
-                                  buttons=None)
-            except NeedJoin as e:
-                if e.request_needed:
-                    await status.edit(f"🔒 «{e.title}» requiere aprobación de un admin para entrar. "
-                                      f"Pedí unirte desde Telegram y volvé a mandar el link.", buttons=None)
-                else:
-                    tok = self._token(self.join_hashes, (e.invite_hash, e.title, "analizar" in job.label.lower()))
-                    await status.edit(f"🚪 Tu cuenta no es miembro de «{e.title}». ¿Me uno?",
-                                      buttons=[[Button.inline("✅ Unirme y seguir", f"jn:{tok}".encode())]])
-            except Exception as e:
-                _log(f"ERROR {job.label}: {e!r}")
-                await status.edit(f"❌ {job.label}\n{e}", buttons=None)
+                await self.finish(job, task, status)
+            except FloodWaitError:
+                pass  # el resultado ya quedo en el log; la cola sigue
+
+    async def finish(self, job: Job, task: asyncio.Task, status):
+        async def edit(text, buttons=None):
+            if status is None:
+                await self.say(text, buttons=buttons)
+                return
+            try:
+                await status.edit(text, buttons=buttons)
+            except MessageNotModifiedError:
+                pass
+
+        try:
+            summary = task.result()
+        except asyncio.CancelledError:
+            _log(f"CANCELADO {job.label}")
+            await edit(f"⛔ Cancelado: {job.label}\nLo ya enviado queda; la próxima vez sigo desde ahí.")
+        except NeedJoin as e:
+            if e.request_needed:
+                await edit(f"🔒 «{e.title}» requiere aprobación de un admin para entrar. "
+                           f"Pedí unirte desde Telegram y volvé a mandar el link.")
+            else:
+                tok = self._token(self.join_hashes, (e.invite_hash, e.title, "analizar" in job.label.lower()))
+                await edit(f"🚪 Tu cuenta no es miembro de «{e.title}». ¿Me uno?",
+                           buttons=[[Button.inline("✅ Unirme y seguir", f"jn:{tok}".encode())]])
+        except Exception as e:
+            _log(f"ERROR {job.label}: {e!r}")
+            await edit(f"❌ {job.label}\n{e}")
+        else:
+            _log(f"OK {job.label}")
+            await edit(f"✔️ {job.label}")
+            for chunk in _chunks(summary or "Listo."):
+                await self.say(chunk)
 
     def source_job(self, link: str, analyze=False) -> Job:
         verb = "Analizar" if analyze else "Organizar"
@@ -643,10 +688,10 @@ class OrganizerBot:
             (self.on_logs, r"^/logs\b\s*(\d+)?"),
         ]
         for handler, pattern in handlers:
-            self.bot.add_event_handler(handler, events.NewMessage(pattern=pattern, **owner))
-        self.bot.add_event_handler(self.on_message, events.NewMessage(**owner))
+            self.bot.add_event_handler(_quiet_flood(handler), events.NewMessage(pattern=pattern, **owner))
+        self.bot.add_event_handler(_quiet_flood(self.on_message), events.NewMessage(**owner))
         self.bot.add_event_handler(
-            self.on_callback, events.CallbackQuery(func=lambda e: e.sender_id == config.OWNER_ID))
+            _quiet_flood(self.on_callback), events.CallbackQuery(func=lambda e: e.sender_id == config.OWNER_ID))
 
 
 async def main() -> None:
@@ -659,7 +704,7 @@ async def main() -> None:
 
     os.makedirs(config.TMP_DIR, exist_ok=True)
     user = TelegramClient(config.USER_SESSION_NAME, config.API_ID, config.API_HASH)
-    bot = TelegramClient(config.BOT_SESSION_NAME, config.API_ID, config.API_HASH)
+    bot = BotClient(config.BOT_SESSION_NAME, config.API_ID, config.API_HASH)
 
     # Sin "async with": su start() sin argumentos pediria telefono por consola.
     await user.connect()
@@ -682,7 +727,10 @@ async def main() -> None:
         app.register()
         worker = asyncio.create_task(app.worker())
         _log(f"Bot iniciado (Claude: {'si' if config.USE_CLAUDE else 'no'})")
-        await app.say("🟢 Organizador listo.", buttons=app.main_menu())
+        try:
+            await app.say("🟢 Organizador listo.", buttons=app.main_menu())
+        except FloodWaitError:
+            pass  # arranca igual, sin el aviso
         await bot.run_until_disconnected()
         worker.cancel()
     finally:

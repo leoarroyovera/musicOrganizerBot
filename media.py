@@ -62,19 +62,21 @@ def clip(text: str, limit: int = MAX_CAPTION) -> str:
 
 class Reporter:
     """Mensaje de estado que se edita como mucho una vez cada `interval`
-    segundos (para no chocar con FloodWait)."""
+    segundos, y aun con force no mas de una vez cada `min_gap` (editar el mismo
+    mensaje durante horas termina en FloodWait de horas para el bot)."""
 
-    def __init__(self, status_msg, header, buttons=None, interval=4.0):
+    def __init__(self, status_msg, header, buttons=None, interval=10.0, min_gap=5.0):
         self.status_msg = status_msg
         self.header = header
         self.buttons = buttons
         self.interval = interval
+        self.min_gap = min_gap
         self.last = 0.0
         self.last_text = None
 
     async def set(self, text, force=False):
         now = time.monotonic()
-        if not force and now - self.last < self.interval:
+        if self.status_msg is None or now - self.last < (self.min_gap if force else self.interval):
             return
         full = f"{self.header}\n\n{text}" if text else self.header
         if full == self.last_text:
