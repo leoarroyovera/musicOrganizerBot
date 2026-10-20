@@ -9,6 +9,7 @@ from urllib.parse import quote_plus
 
 from telethon import Button, TelegramClient, events, utils
 from telethon.errors import FloodWaitError, MessageNotModifiedError
+from telethon.tl.functions import messages
 from telethon.tl.functions.bots import SetBotCommandsRequest
 from telethon.tl.types import BotCommand, BotCommandScopeDefault
 
@@ -77,12 +78,16 @@ def _chunks(text: str, size=MAX_MESSAGE):
 
 
 class BotClient(TelegramClient):
-    """Despues de un FloodWait no vuelve a llamar a Telegram hasta que venza:
-    seguir insistiendo durante la espera solo la estira."""
+    """Despues de un FloodWait al mandar o editar mensajes no vuelve a hacerlo
+    hasta que venza: seguir insistiendo durante la espera solo la estira. El
+    resto de las llamadas (updates, etc.) no se frena: Telethon las necesita
+    para seguir conectado."""
 
     flood_until = 0.0
 
     async def __call__(self, request, ordered=False, flood_sleep_threshold=None):
+        if type(request).__module__ != messages.__name__:
+            return await super().__call__(request, ordered, flood_sleep_threshold)
         left = self.flood_until - time.monotonic()
         if left > 0:
             raise FloodWaitError(request, int(left) + 1)
